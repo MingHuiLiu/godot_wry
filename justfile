@@ -57,17 +57,24 @@ build-macos-universal:
 	cp -R ./target/release/libgodot_wry.framework ../godot/addons/godot_wry/bin/universal-apple-darwin
 
 build-ios:
-	@echo "Building iOS arm64 xcframework..."
+	@echo "Building static iOS XCFramework (device + simulator)..."
 	cargo build --target aarch64-apple-ios --locked --release
-	rm -rf ./target/aarch64-apple-ios/release/libgodot_wry.framework ./target/aarch64-apple-ios/release/libgodot_wry.xcframework
-	mkdir -p ./target/aarch64-apple-ios/release/libgodot_wry.framework
-	cp ./target/aarch64-apple-ios/release/libgodot_wry.dylib ./target/aarch64-apple-ios/release/libgodot_wry.framework/libgodot_wry
-	install_name_tool -id "@rpath/libgodot_wry.framework/libgodot_wry" ./target/aarch64-apple-ios/release/libgodot_wry.framework/libgodot_wry
-	cp ../assets/Info.ios.plist ./target/aarch64-apple-ios/release/libgodot_wry.framework/Info.plist
-	plutil -convert binary1 ./target/aarch64-apple-ios/release/libgodot_wry.framework/Info.plist
-	xcodebuild -create-xcframework -framework ./target/aarch64-apple-ios/release/libgodot_wry.framework -output ./target/aarch64-apple-ios/release/libgodot_wry.xcframework
-	mkdir -p ../godot/addons/godot_wry/bin/aarch64-apple-ios
-	cp -R ./target/aarch64-apple-ios/release/libgodot_wry.xcframework ../godot/addons/godot_wry/bin/aarch64-apple-ios/
+	cargo build --target aarch64-apple-ios-sim --locked --release
+	cargo build --target x86_64-apple-ios --locked --release
+	rm -rf ./target/ios-xcframework ./target/release/libgodot_wry.xcframework
+	mkdir -p ./target/ios-xcframework/device ./target/ios-xcframework/simulator
+	cp ./target/aarch64-apple-ios/release/libgodot_wry.a ./target/ios-xcframework/device/libgodot_wry.a
+	lipo -create \
+		./target/aarch64-apple-ios-sim/release/libgodot_wry.a \
+		./target/x86_64-apple-ios/release/libgodot_wry.a \
+		-output ./target/ios-xcframework/simulator/libgodot_wry.a
+	xcodebuild -create-xcframework \
+		-library ./target/ios-xcframework/device/libgodot_wry.a \
+		-library ./target/ios-xcframework/simulator/libgodot_wry.a \
+		-output ./target/release/libgodot_wry.xcframework
+	rm -rf ../godot/addons/godot_wry/bin/ios
+	mkdir -p ../godot/addons/godot_wry/bin/ios
+	cp -R ./target/release/libgodot_wry.xcframework ../godot/addons/godot_wry/bin/ios/
 
 build-android:
 	@echo "Building Android arm64-v8a and x86_64 libraries..."
