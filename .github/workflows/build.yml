@@ -83,7 +83,7 @@ jobs:
           if-no-files-found: error
 
   ios:
-    name: 📱 iOS / arm64 device
+    name: 📱 iOS / device + simulator
     runs-on: macos-latest
 
     steps:
@@ -93,28 +93,33 @@ jobs:
       - name: Install Rust
         uses: dtolnay/rust-toolchain@stable
         with:
-          targets: aarch64-apple-ios
+          targets: aarch64-apple-ios,aarch64-apple-ios-sim,x86_64-apple-ios
 
       - name: Install Just
         uses: extractions/setup-just@v2
 
-      - name: Build iOS xcframework
+      - name: Build iOS XCFramework
         run: just build-ios
 
       - name: Validate iOS package
         run: |
-          test -f godot/addons/godot_wry/bin/aarch64-apple-ios/libgodot_wry.xcframework/Info.plist
-          test -d godot/addons/godot_wry/bin/aarch64-apple-ios/libgodot_wry.xcframework
+          XC=godot/addons/godot_wry/bin/ios/libgodot_wry.xcframework
+          test -f "$XC/Info.plist"
+          test -d "$XC"
+          plutil -p "$XC/Info.plist"
+          find "$XC" -type f -name libgodot_wry -print -exec file {} \;
+          test "$(find "$XC" -type f -name libgodot_wry | wc -l | tr -d ' ')" -eq 2
+          find "$XC" -type f -name libgodot_wry -exec codesign --verify --strict --verbose=2 {} \;
 
       - name: Stage iOS artifact
         run: |
           mkdir -p artifact/bin
-          cp -R godot/addons/godot_wry/bin/aarch64-apple-ios artifact/bin/
+          cp -R godot/addons/godot_wry/bin/ios artifact/bin/
 
       - name: Upload iOS artifact
         uses: actions/upload-artifact@v4
         with:
-          name: ios-aarch64-apple-ios
+          name: ios
           path: artifact
           if-no-files-found: error
 
@@ -224,7 +229,7 @@ jobs:
       - name: Download iOS binaries
         uses: actions/download-artifact@v4
         with:
-          name: ios-aarch64-apple-ios
+          name: ios
           path: package/addons/godot_wry
 
       - name: Download Android binaries and template layer
@@ -239,7 +244,7 @@ jobs:
           test -f package/addons/godot_wry/bin/x86_64-unknown-linux-gnu/libgodot_wry.so
           test -d package/addons/godot_wry/bin/universal-apple-darwin/libgodot_wry.framework
           test -f package/addons/godot_wry/bin/x86_64-pc-windows-msvc/godot_wry.dll
-          test -d package/addons/godot_wry/bin/aarch64-apple-ios/libgodot_wry.xcframework
+          test -d package/addons/godot_wry/bin/ios/libgodot_wry.xcframework
           test -f package/addons/godot_wry/bin/android/arm64-v8a/libgodot_wry.so
           test -f package/addons/godot_wry/bin/android/x86_64/libgodot_wry.so
           test -f package/addons/godot_wry/android/kotlin/com/example/godotwry/RustWebView.kt
@@ -301,7 +306,7 @@ jobs:
           cp -R package package-ios
 
           find package-android/addons/godot_wry/bin -mindepth 1 -maxdepth 1             ! -name android -exec rm -rf {} +
-          find package-ios/addons/godot_wry/bin -mindepth 1 -maxdepth 1             ! -name aarch64-apple-ios -exec rm -rf {} +
+          find package-ios/addons/godot_wry/bin -mindepth 1 -maxdepth 1             ! -name ios -exec rm -rf {} +
           rm -rf package-ios/addons/godot_wry/android/kotlin
 
       - name: Upload all-platform Godot addon
@@ -324,82 +329,3 @@ jobs:
           name: godot_wry-ios
           path: package-ios
           if-no-files-found: error
-
-  release:
-    name: 🚀 Publish GitHub Release
-    needs: [package]
-    if: ${{ github.event_name == 'push' && startsWith(github.event.head_commit.message, 'release:') }}
-    runs-on: ubuntu-latest
-    permissions:
-      contents: write
-    env:
-      RELEASE_TAG: v0.2.0
-
-    steps:
-      - name: Download all-platform package
-        uses: actions/download-artifact@v4
-        with:
-          name: godot_wry
-          path: release/godot_wry
-
-      - name: Download Android package
-        uses: actions/download-artifact@v4
-        with:
-          name: godot_wry-android
-          path: release/godot_wry-android
-
-      - name: Download iOS package
-        uses: actions/download-artifact@v4
-        with:
-          name: godot_wry-ios
-          path: release/godot_wry-ios
-
-      - name: Create release ZIP files
-        run: |
-          (cd release/godot_wry && zip -qr ../godot_wry.zip .)
-          (cd release/godot_wry-android && zip -qr ../godot_wry-android.zip .)
-          (cd release/godot_wry-ios && zip -qr ../godot_wry-ios.zip .)
-
-      - name: Publish release
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: |
-          cat > release-notes.md <<'EOF'
-          ## Godot WRY 0.2.0
-
-          This release upgrades the extension to **Godot 4.7** and adds support for running WebViews while the game is embedded in the Godot Editor's Game workspace.
-
-          ### Highlights
-          - Godot 4.7 / godot-rust 0.5.5 (`api-4-7`)
-          - Windows/Linux embedded-game mode continues to use Godot's native child game window
-          - macOS 4.7 embedded-game mode uses an automatic editor-process WebView bridge compatible with Godot's CAContext/CALayer renderer
-          - WebView bounds, visibility, navigation, JavaScript evaluation, IPC, page-load events, focus, zoom and devtools are mirrored in embedded mode
-          - Existing Android and iOS support is retained
-
-          ### Included packages
-          - `godot_wry.zip`: all supported platforms
-          - `godot_wry-android.zip`: Android arm64-v8a + x86_64, including WRY Kotlin/Godot Gradle integration
-          - `godot_wry-ios.zip`: iOS arm64 device XCFramework
-
-          ### Android
-          After extracting into an existing Godot project, install the Godot Android Build Template once, then run:
-          ```bash
-          python addons/godot_wry/android/install.py
-          ```
-          Export Android with Gradle Build enabled.
-
-          ### iOS
-          Includes a device-arm64 XCFramework under `addons/godot_wry/bin/aarch64-apple-ios/`.
-
-          ### Editor embedded game mode
-          No editor plugin needs to be enabled. On macOS, the extension automatically hosts WKWebView in the editor process when `Engine.is_embedded_in_editor()` is active.
-
-          Built and validated by GitHub Actions on Linux, Windows, macOS, Android and iOS, including a real Godot 4.7 addon load smoke test.
-          EOF
-
-          if gh release view "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
-            gh release upload "$RELEASE_TAG"               release/godot_wry.zip               release/godot_wry-android.zip               release/godot_wry-ios.zip               --clobber               --repo "$GITHUB_REPOSITORY"
-          else
-            gh release create "$RELEASE_TAG"               release/godot_wry.zip               release/godot_wry-android.zip               release/godot_wry-ios.zip               --target "$GITHUB_SHA"               --title "Godot WRY v0.2.0 — Godot 4.7 & Editor Embedded WebView"               --notes-file release-notes.md               --repo "$GITHUB_REPOSITORY"
-          fi
-
