@@ -158,8 +158,17 @@ jobs:
             templates/ios.zip \
             turnkey-ios/addons/godot_wry/ios/templates/mono/ios.zip
 
+          python3 scripts/patch_turnkey_ios_template.py \
+            turnkey-ios/addons/godot_wry/ios/templates/standard/ios.zip
+          python3 scripts/patch_turnkey_ios_template.py \
+            turnkey-ios/addons/godot_wry/ios/templates/mono/ios.zip
+
           python3 -m zipfile -t turnkey-ios/addons/godot_wry/ios/templates/standard/ios.zip
           python3 -m zipfile -t turnkey-ios/addons/godot_wry/ios/templates/mono/ios.zip
+          unzip -p turnkey-ios/addons/godot_wry/ios/templates/standard/ios.zip \
+            '*/project.pbxproj' | grep -q -- '-framework WebKit'
+          unzip -p turnkey-ios/addons/godot_wry/ios/templates/mono/ios.zip \
+            '*/project.pbxproj' | grep -q -- '-framework WebKit'
           cp third_party/godot/LICENSE.txt turnkey-ios/THIRD_PARTY_NOTICES/GODOT_LICENSE.txt
 
       - name: Validate offline iOS template installer
