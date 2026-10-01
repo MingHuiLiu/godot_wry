@@ -84,6 +84,7 @@ jobs:
 
   ios:
     name: 📱 iOS / device + simulator turnkey
+    needs: [desktop]
     runs-on: macos-latest
 
     steps:
@@ -117,6 +118,24 @@ jobs:
           find turnkey-ios/addons/godot_wry/bin -mindepth 1 -maxdepth 1 \
             ! -name ios -exec rm -rf {} +
           rm -rf turnkey-ios/addons/godot_wry/android/kotlin
+
+      - name: Add Linux host binaries to iOS package
+        uses: actions/download-artifact@v4
+        with:
+          name: desktop-x86_64-unknown-linux-gnu
+          path: turnkey-ios/addons/godot_wry
+
+      - name: Add macOS host binaries to iOS package
+        uses: actions/download-artifact@v4
+        with:
+          name: desktop-universal-apple-darwin
+          path: turnkey-ios/addons/godot_wry
+
+      - name: Add Windows host binaries to iOS package
+        uses: actions/download-artifact@v4
+        with:
+          name: desktop-x86_64-pc-windows-msvc
+          path: turnkey-ios/addons/godot_wry
 
       - name: Install Godot 4.7 iOS export template
         run: |
