@@ -232,6 +232,10 @@ impl BridgeConnection {
         match message {
             BridgeMessage::Hello { version } => {
                 self.protocol_ok = version == BRIDGE_PROTOCOL_VERSION;
+                godot_print!(
+                    "[Godot WRY] Editor bridge handshake: version={version}, accepted={}",
+                    self.protocol_ok
+                );
                 if !self.protocol_ok {
                     self.send(&BridgeMessage::Error {
                         id: 0,
@@ -242,6 +246,7 @@ impl BridgeConnection {
                 }
             }
             BridgeMessage::Create { id, config, bounds } if self.protocol_ok => {
+                godot_print!("[Godot WRY] Editor bridge queued WebView id={id}");
                 self.pending_hosts.insert(id, (config, bounds));
                 self.try_create_pending();
             }
@@ -438,6 +443,9 @@ impl HostedWebView {
                 payload,
             };
             if let Ok(mut stream) = ipc_writer.lock() {
+                if !payload.starts_with("{\"type\":\"_") {
+                    godot_print!("[Godot WRY] Editor bridge IPC id={id}: {payload}");
+                }
                 let _ = write_message(&mut stream, &message);
             }
         })
@@ -474,9 +482,13 @@ impl HostedWebView {
             builder = builder.with_initialization_script(FORWARD_INPUT_SCRIPT);
         }
 
+        godot_print!(
+            "[Godot WRY] Creating editor-hosted WKWebView id={id} in editor window {parent_window_id}"
+        );
         let webview = builder
             .build_as_child(&parent)
             .map_err(|error| format!("Failed to create editor-hosted WKWebView: {error}"))?;
+        godot_print!("[Godot WRY] Editor-hosted WKWebView id={id} created");
 
         let mut host = Self {
             webview,
