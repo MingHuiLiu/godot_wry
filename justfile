@@ -7,7 +7,7 @@ default: build
 
 set working-directory := 'rust'
 
-build: 
+build:
 	@echo "Building for {{os}} ({{target}})..."
 	@just _build-{{os}}
 	@just _copy-to-godot-{{os}}
@@ -43,7 +43,7 @@ _copy-to-godot-windows:
 	mkdir -p ../godot/addons/godot_wry/bin/{{target}}
 	cp ./target/{{target}}/release/godot_wry.dll ../godot/addons/godot_wry/bin/{{target}}/
 
-build-all: build-macos-universal build-linux build-windows
+build-all: build-macos-universal build-linux build-windows build-ios build-android
 
 build-macos-universal:
 	@echo "Building universal macOS binary..."
@@ -55,6 +55,25 @@ build-macos-universal:
 	cp ../assets/Info.plist ./target/release/libgodot_wry.framework/Resources/Info.plist
 	mkdir -p ../godot/addons/godot_wry/bin/universal-apple-darwin
 	cp -R ./target/release/libgodot_wry.framework ../godot/addons/godot_wry/bin/universal-apple-darwin
+
+build-ios:
+	@echo "Building iOS arm64 xcframework..."
+	cargo build --target aarch64-apple-ios --locked --release
+	rm -rf ./target/aarch64-apple-ios/release/libgodot_wry.framework ./target/aarch64-apple-ios/release/libgodot_wry.xcframework
+	mkdir -p ./target/aarch64-apple-ios/release/libgodot_wry.framework
+	cp ./target/aarch64-apple-ios/release/libgodot_wry.dylib ./target/aarch64-apple-ios/release/libgodot_wry.framework/libgodot_wry
+	install_name_tool -id "@rpath/libgodot_wry.framework/libgodot_wry" ./target/aarch64-apple-ios/release/libgodot_wry.framework/libgodot_wry
+	cp ../assets/Info.ios.plist ./target/aarch64-apple-ios/release/libgodot_wry.framework/Info.plist
+	plutil -convert binary1 ./target/aarch64-apple-ios/release/libgodot_wry.framework/Info.plist
+	xcodebuild -create-xcframework -framework ./target/aarch64-apple-ios/release/libgodot_wry.framework -output ./target/aarch64-apple-ios/release/libgodot_wry.xcframework
+	mkdir -p ../godot/addons/godot_wry/bin/aarch64-apple-ios
+	cp -R ./target/aarch64-apple-ios/release/libgodot_wry.xcframework ../godot/addons/godot_wry/bin/aarch64-apple-ios/
+
+build-android:
+	@echo "Building Android arm64-v8a and x86_64 libraries..."
+	mkdir -p ../build/android-kotlin/com/example/godotwry
+	WRY_ANDROID_PACKAGE=com.example.godotwry WRY_ANDROID_LIBRARY=godot_wry WRY_ANDROID_KOTLIN_FILES_OUT_DIR="$(pwd)/../build/android-kotlin/com/example/godotwry" cargo ndk -t aarch64-linux-android -o ../godot/addons/godot_wry/bin/android build --locked --release
+	WRY_ANDROID_PACKAGE=com.example.godotwry WRY_ANDROID_LIBRARY=godot_wry WRY_ANDROID_KOTLIN_FILES_OUT_DIR="$(pwd)/../build/android-kotlin/com/example/godotwry" cargo ndk -t x86_64-linux-android -o ../godot/addons/godot_wry/bin/android build --locked --release
 
 build-linux:
 	@echo "Building for Linux..."
