@@ -2,7 +2,7 @@ name: 🤖 GDExtension
 
 on:
   push:
-    branches: [main]
+    branches: [main, feat/mobile-support]
     paths-ignore:
       - "docs/**"
       - "**.md"
