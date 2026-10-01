@@ -34,6 +34,10 @@ def extract_android_template(source_zip: Path, output: Path, template_id: str) -
     with zipfile.ZipFile(source_zip) as archive:
         archive.extractall(build_root)
 
+    gradlew = build_root / "gradlew"
+    if gradlew.exists():
+        gradlew.chmod(0o755)
+
     # Godot checks this marker before accepting an existing custom build.
     (android_root / ".build_version").write_text(template_id + "\n", encoding="utf-8")
 
