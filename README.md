@@ -3,7 +3,7 @@
 </a>
 
 <p align="center">
-  <img src="https://img.shields.io/static/v1?label=Godot&message=4.2%2B&color=478CBF&logo=godotengine">
+  <img src="https://img.shields.io/static/v1?label=Godot&message=4.7%2B&color=478CBF&logo=godotengine">
   <img src="https://github.com/MingHuiLiu/godot_wry/actions/workflows/build.yml/badge.svg">
   <a href="https://discord.gg/B9fWw3raZJ">
     <img src="https://img.shields.io/static/v1?label=Need%20help%3F&message=Join%20us%20on%20Discord!&color=5865F2&logo=discord">
@@ -20,6 +20,7 @@
 - 🌎 Load website URLs and local `res://` files
 - 🧩 JavaScript ⇔ GDScript code integration
 - 🚥 Mouse/keyboard input events forwarding
+- 🧩 Runs inside Godot 4.7's embedded **Game** workspace, including macOS
 
 ## ⛹️ Demo
 
@@ -44,7 +45,7 @@
 
 The easiest way to install Godot WRY is through Godot's [Asset Library](https://godotengine.org/asset-library/asset/3426). You can install it via the editor by following these instructions:
 
-1. Open your project in Godot 4.2 or later.
+1. Open your project in Godot 4.7 or later.
 2. Go to the "📥 AssetLib" tab at the top of the editor.
 3. Search for "Godot WRY".
 4. Click on the Godot WRY extension and click **Download**.
@@ -52,7 +53,7 @@ The easiest way to install Godot WRY is through Godot's [Asset Library](https://
 
 ### GitHub Actions / releases
 
-The build workflow publishes three ready-to-use artifacts:
+The build workflow and GitHub Releases publish three ready-to-use packages:
 
 - `godot_wry` — all desktop + Android + iOS binaries.
 - `godot_wry-android` — Android arm64-v8a/x86_64 binaries plus the WRY Kotlin/Gradle integration.
@@ -67,6 +68,17 @@ python addons/godot_wry/android/install.py
 ```
 
 After that, export Android with **Gradle Build** enabled.
+
+### Godot 4.7 embedded Game workspace
+
+Godot WRY 0.2.0 supports running the game inside the editor's **Game** workspace.
+
+- **Windows / Linux:** WRY attaches to the native game child window that Godot embeds in the editor.
+- **macOS:** Godot 4.7 renders embedded games through a cross-process `CAContext/CALayer`, so the game process no longer owns an `NSView` that can host `WKWebView`. Godot WRY detects `Engine.is_embedded_in_editor()` and automatically mirrors WebView state to the editor process over a project-local Unix socket. The editor-hosted WKWebView is positioned over the visible `GamePanel`.
+- WebView IPC and page-load signals are forwarded back to the running game, and forwarded mouse/keyboard coordinates are remapped when the Game workspace scales the game.
+- Moving the Game workspace between the main editor window and a floating window is handled by native WRY reparenting.
+
+No additional EditorPlugin needs to be enabled.
 
 ### Build from source
 
@@ -109,6 +121,7 @@ Please refer to the [Docs](https://godot-wry.doce.sh) for API reference and in-d
 
 ## ❌ Caveats
 
+- Godot **4.7 or newer** is required by this fork/release.
 - Webview always renders on top
 - Different browser engines across platforms
 - No automatic dependency checks
