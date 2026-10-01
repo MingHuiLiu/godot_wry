@@ -3,8 +3,8 @@
 </a>
 
 <p align="center">
-  <img src="https://img.shields.io/static/v1?label=Godot&message=4.1%2B&color=478CBF&logo=godotengine">
-  <img src="https://github.com/doceazedo/godot_wry/actions/workflows/build.yml/badge.svg">
+  <img src="https://img.shields.io/static/v1?label=Godot&message=4.2%2B&color=478CBF&logo=godotengine">
+  <img src="https://github.com/MingHuiLiu/godot_wry/actions/workflows/build.yml/badge.svg">
   <a href="https://discord.gg/B9fWw3raZJ">
     <img src="https://img.shields.io/static/v1?label=Need%20help%3F&message=Join%20us%20on%20Discord!&color=5865F2&logo=discord">
   </a>
@@ -44,17 +44,29 @@
 
 The easiest way to install Godot WRY is through Godot's [Asset Library](https://godotengine.org/asset-library/asset/3426). You can install it via the editor by following these instructions:
 
-1. Open your project in Godot 4.1 or later.
+1. Open your project in Godot 4.2 or later.
 2. Go to the "📥 AssetLib" tab at the top of the editor.
 3. Search for "Godot WRY".
 4. Click on the Godot WRY extension and click **Download**.
 5. In the configuration dialog, click **Install**.
 
-### GitHub releases
+### GitHub Actions / releases
 
-1. Go to the [Releases](https://github.com/doceazedo/godot_wry/releases) page.
-2. Download the latest release ZIP file (_not_ the source code).
-3. Extract the contents into your project's "addons" folder (create one if it doesn't exist yet).
+The build workflow publishes three ready-to-use artifacts:
+
+- `godot_wry` — all desktop + Android + iOS binaries.
+- `godot_wry-android` — Android arm64-v8a/x86_64 binaries plus the WRY Kotlin/Gradle integration.
+- `godot_wry-ios` — the iOS arm64 device xcframework.
+
+Each artifact is rooted at `addons/godot_wry`, so extract it directly into an existing Godot project.
+
+For Android, install Godot's Android Build Template once, then run:
+
+```sh
+python addons/godot_wry/android/install.py
+```
+
+After that, export Android with **Gradle Build** enabled.
 
 ### Build from source
 
@@ -77,8 +89,8 @@ Please refer to the [Docs](https://godot-wry.doce.sh) for API reference and in-d
 | **Windows (10, 11)**            | ✅ Supported   | WebView2 (Chromium)        |
 | **Mac (Intel, Apple Sillicon)** | ✅ Supported   | WebKit                     |
 | **Linux (X11)**                 | 🚧 Supported\* | WebKitGTK                  |
-| **Android**                     | ⏳ Planned     | Android WebView (Chromium) |
-| **iOS**                         | ⏳ Planned     | WebKit                     |
+| **Android (arm64, x86_64)**     | 🚧 Supported\* | Android WebView (Chromium) |
+| **iOS (arm64 device)**          | 🚧 Supported\* | WebKit                     |
 | **Browser/HTML5**               | ⏳ Planned     | —                          |
 
 ### Linux
@@ -87,15 +99,20 @@ Please refer to the [Docs](https://godot-wry.doce.sh) for API reference and in-d
 
 \* X11 support only. Transparency is currently not supported. See [#17](https://github.com/doceazedo/godot_wry/issues/17).
 
-### Android/iOS
+### Android
 
-WRY itself already has [mobile support](https://github.com/tauri-apps/wry/blob/dev/MOBILE.md). Contributions to add Android/iOS support in this extension are welcome!
+\* Android support uses WRY's native Android bridge and requires Godot's Gradle-based Android Build Template. The packaged `install.py` wires the generated Kotlin bridge and WRY-compatible `GodotActivity` subclass into an existing project. Native packages are built for arm64-v8a devices and x86_64 emulators.
+
+### iOS
+
+\* iOS exports currently ship a device-only arm64 xcframework. Simulator slices are not included yet. Build locally on macOS with Xcode using `just build-ios`.
 
 ## ❌ Caveats
 
 - Webview always renders on top
 - Different browser engines across platforms
 - No automatic dependency checks
+- iOS support is device-only for now
 
 You can learn more about these caveats on the [Caveats](https://godot-wry.doce.sh/about/caveats.html) documentation page.
 
