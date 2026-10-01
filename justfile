@@ -61,9 +61,9 @@ build-macos-universal:
 
 build-ios:
 	@echo "Building iOS device + simulator XCFramework..."
-	cargo build --target aarch64-apple-ios --locked --release
-	cargo build --target aarch64-apple-ios-sim --locked --release
-	cargo build --target x86_64-apple-ios --locked --release
+	IPHONEOS_DEPLOYMENT_TARGET=13.0 cargo build --target aarch64-apple-ios --locked --release
+	IPHONEOS_DEPLOYMENT_TARGET=13.0 cargo build --target aarch64-apple-ios-sim --locked --release
+	IPHONEOS_DEPLOYMENT_TARGET=13.0 cargo build --target x86_64-apple-ios --locked --release
 	rm -rf ./target/ios-xcframework
 	mkdir -p ./target/ios-xcframework/device/libgodot_wry.framework
 	mkdir -p ./target/ios-xcframework/simulator/libgodot_wry.framework
