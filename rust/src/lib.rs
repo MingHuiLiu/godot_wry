@@ -211,6 +211,17 @@ impl IControl for WebView {
         }
     }
 
+    fn exit_tree(&mut self) {
+        #[cfg(target_os = "macos")]
+        if self.editor_bridge.is_some() {
+            self.send_editor_bridge(editor_bridge::BridgeMessage::Destroy {
+                id: self.editor_bridge_id,
+            });
+            self.editor_bridge = None;
+            self.editor_bridge_id = 0;
+        }
+    }
+
     fn process(&mut self, _delta: f64) {
         if let Ok(mut pos) = self.cached_global_position.lock() {
             *pos = self.base().get_global_position();
