@@ -11,249 +11,63 @@ permissions:
   contents: write
 
 jobs:
-  mobile_release:
-    name: 📱 Package Android & iOS
+  publish:
+    name: 🚀 Publish v0.3.0
     if: >-
       ${{ github.event.workflow_run.conclusion == 'success' &&
           startsWith(github.event.workflow_run.head_commit.message, 'release:') }}
-    runs-on: macos-latest
+    runs-on: ubuntu-latest
     env:
       RELEASE_TAG: v0.3.0
 
     steps:
-      - name: Checkout release commit
-        uses: actions/checkout@v4
-        with:
-          ref: ${{ github.event.workflow_run.head_sha }}
-
-      - name: Download all-platform addon from build workflow
+      - name: Download all-platform addon
         uses: actions/download-artifact@v4
         with:
           name: godot_wry
-          path: mobile-base
+          path: release/godot_wry
           repository: ${{ github.repository }}
           run-id: ${{ github.event.workflow_run.id }}
           github-token: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Set up Java 17
-        uses: actions/setup-java@v4
+      - name: Download Android Standard bundle
+        uses: actions/download-artifact@v4
         with:
-          distribution: temurin
-          java-version: "17"
+          name: godot_wry-android-godot4.7
+          path: release/godot_wry-android-godot4.7
+          repository: ${{ github.repository }}
+          run-id: ${{ github.event.workflow_run.id }}
+          github-token: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Set up Android SDK
-        uses: android-actions/setup-android@v3
-
-      - name: Install Android build tools
-        run: |
-          yes | sdkmanager "platforms;android-36" "build-tools;36.1.0" >/dev/null
-
-      - name: Cache official Godot template archives
-        uses: actions/cache@v4
+      - name: Download Android Mono bundle
+        uses: actions/download-artifact@v4
         with:
-          path: build/godot-template-cache
-          key: godot-4.7-mobile-template-archives-v1
+          name: godot_wry-android-godot4.7-mono
+          path: release/godot_wry-android-godot4.7-mono
+          repository: ${{ github.repository }}
+          run-id: ${{ github.event.workflow_run.id }}
+          github-token: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Download official Godot 4.7 Standard and Mono templates
-        shell: bash
-        run: |
-          set -euo pipefail
-          mkdir -p build/godot-template-cache
-          if [ ! -f build/godot-template-cache/standard.tpz ]; then
-            curl -L --fail --retry 3 -o build/godot-template-cache/standard.tpz \
-              https://github.com/godotengine/godot/releases/download/4.7-stable/Godot_v4.7-stable_export_templates.tpz
-          fi
-          echo "9714459dc071907c0f3d5f17d608faf69e7cda21331fc5d39c4503ffa4e99eec  build/godot-template-cache/standard.tpz" | shasum -a 256 -c -
-          if [ ! -f build/godot-template-cache/mono.tpz ]; then
-            curl -L --fail --retry 3 -o build/godot-template-cache/mono.tpz \
-              https://github.com/godotengine/godot/releases/download/4.7-stable/Godot_v4.7-stable_mono_export_templates.tpz
-          fi
-          echo "4c02a0b99ad9c5bc243c2e79468628db3df89350d9db8fc995988f69d126e069  build/godot-template-cache/mono.tpz" | shasum -a 256 -c -
+      - name: Download iOS bundle
+        uses: actions/download-artifact@v4
+        with:
+          name: godot_wry-ios-godot4.7
+          path: release/godot_wry-ios-godot4.7
+          repository: ${{ github.repository }}
+          run-id: ${{ github.event.workflow_run.id }}
+          github-token: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Extract Android and iOS templates
-        shell: bash
+      - name: Create ZIP files and checksums
         run: |
-          set -euo pipefail
-          mkdir -p build/mobile-templates
-          extract_member() {
-            archive="$1"
-            suffix="$2"
-            output="$3"
-            member="$(unzip -Z1 "$archive" | grep -E "(^|/)${suffix}$" | head -1)"
-            if [ -z "$member" ]; then
-              echo "Could not find $suffix in $archive" >&2
-              exit 1
-            fi
-            unzip -p "$archive" "$member" > "$output"
-            unzip -t "$output" >/dev/null
-          }
-          extract_member build/godot-template-cache/standard.tpz android_source.zip build/mobile-templates/android-standard.zip
-          extract_member build/godot-template-cache/mono.tpz android_source.zip build/mobile-templates/android-mono.zip
-          extract_member build/godot-template-cache/standard.tpz ios.zip build/mobile-templates/ios-standard.zip
-          extract_member build/godot-template-cache/mono.tpz ios.zip build/mobile-templates/ios-mono.zip
-          ls -lh build/mobile-templates
+          (cd release/godot_wry && zip -qr ../godot_wry.zip .)
+          (cd release/godot_wry-android-godot4.7 && zip -qr ../godot_wry-android-godot4.7.zip .)
+          (cd release/godot_wry-android-godot4.7-mono && zip -qr ../godot_wry-android-godot4.7-mono.zip .)
+          (cd release/godot_wry-ios-godot4.7 && zip -qr ../godot_wry-ios-godot4.7.zip .)
 
-      - name: Assemble zero-download Android Standard bundle
-        run: |
-          cp -R mobile-base package-android-standard
-          python3 scripts/prepare_android_release.py \
-            --package-root package-android-standard \
-            --android-source build/mobile-templates/android-standard.zip \
-            --template-id 4.7.stable
-          cat > package-android-standard/README_ANDROID.md <<'EOF'
-          # Godot WRY — Android / Godot 4.7 Standard
-          Extract this ZIP into the root of an existing Godot 4.7 Standard project.
-          Enable **Gradle Build** in the Android export preset and export normally.
-          The official Godot 4.7 Gradle template/AARs, WRY Kotlin bridge,
-          WryActivity and arm64-v8a/x86_64 native libraries are already included.
-          No additional download and no install.py step are required.
-          EOF
-
-      - name: Assemble zero-download Android Mono bundle
-        run: |
-          cp -R mobile-base package-android-mono
-          python3 scripts/prepare_android_release.py \
-            --package-root package-android-mono \
-            --android-source build/mobile-templates/android-mono.zip \
-            --template-id 4.7.stable.mono
-          cat > package-android-mono/README_ANDROID.md <<'EOF'
-          # Godot WRY — Android / Godot 4.7 Mono
-          Extract this ZIP into the root of an existing Godot 4.7 Mono project.
-          Enable **Gradle Build** in the Android export preset and export normally.
-          The official Godot 4.7 Mono Gradle template/AARs, WRY Kotlin bridge,
-          WryActivity and arm64-v8a/x86_64 native libraries are already included.
-          No additional download and no install.py step are required.
-          EOF
-
-      - name: Smoke-test Android Standard Gradle template
-        shell: bash
-        run: |
-          set -euo pipefail
-          cd package-android-standard/android/build
-          ./gradlew --no-daemon assembleStandardDebug \
-            -Pexport_package_name=com.example.godotwrysmoke \
-            -Pexport_edition=standard -Pexport_build_type=debug \
-            -Pexport_enabled_abis='arm64-v8a|x86_64|'
-          grep -R -q "com.example.godotwry.WryActivity" build/intermediates/merged_manifests
-          cd ../../..
-          rm -rf package-android-standard/android/build/build package-android-standard/android/build/.gradle
-
-      - name: Smoke-test Android Mono Gradle template
-        shell: bash
-        run: |
-          set -euo pipefail
-          cd package-android-mono/android/build
-          ./gradlew --no-daemon assembleMonoDebug \
-            -Pexport_package_name=com.example.godotwrysmokemono \
-            -Pexport_edition=mono -Pexport_build_type=debug \
-            -Pexport_enabled_abis='arm64-v8a|x86_64|'
-          grep -R -q "com.example.godotwry.WryActivity" build/intermediates/merged_manifests
-          cd ../../..
-          rm -rf package-android-mono/android/build/build package-android-mono/android/build/.gradle
-
-      - name: Assemble self-contained iOS bundle
-        run: |
-          cp -R mobile-base package-ios
-          mkdir -p package-ios/godot_wry_ios/templates/4.7.stable package-ios/godot_wry_ios/templates/4.7.stable.mono
-          cp build/mobile-templates/ios-standard.zip package-ios/godot_wry_ios/templates/4.7.stable/ios.zip
-          cp build/mobile-templates/ios-mono.zip package-ios/godot_wry_ios/templates/4.7.stable.mono/ios.zip
-          cp scripts/install_ios_templates.py package-ios/godot_wry_ios/install_templates.py
-          chmod +x package-ios/godot_wry_ios/install_templates.py
-          cat > package-ios/godot_wry_ios/install.command <<'EOF'
-          #!/bin/sh
-          cd "$(dirname "$0")"
-          exec /usr/bin/env python3 install_templates.py "$@"
-          EOF
-          chmod +x package-ios/godot_wry_ios/install.command
-          cat > package-ios/README_IOS.md <<'EOF'
-          # Godot WRY — iOS / Godot 4.7
-          The addon includes an arm64 device + arm64/x86_64 simulator XCFramework.
-          This Release also includes official Godot 4.7 Standard and Mono ios.zip
-          export templates, so no template download is required.
-          After extracting into a project, run once on the Mac:
-              python3 godot_wry_ios/install_templates.py
-          The installer only copies files already in this Release into Godot's
-          local export_templates folders and does not access the network.
-          EOF
-
-      - name: Download Godot 4.7 macOS editor
-        run: |
-          curl -L --fail --retry 3 -o build/Godot_v4.7-stable_macos.universal.zip \
-            https://github.com/godotengine/godot/releases/download/4.7-stable/Godot_v4.7-stable_macos.universal.zip
-          echo "a6708c336f690e0dd8abd3d587d661707f4f33ed436946a3ec000d2fb497fd6c  build/Godot_v4.7-stable_macos.universal.zip" | shasum -a 256 -c -
-          unzip -q build/Godot_v4.7-stable_macos.universal.zip -d build/godot47-macos
-
-      - name: Smoke-test Godot iOS project export
-        shell: bash
-        run: |
-          set -euo pipefail
-          GODOT="$(find build/godot47-macos -path '*/Contents/MacOS/Godot' -type f | head -1)"
-          test -x "$GODOT"
-          mkdir -p ios-smoke/addons ios-smoke/build
-          cp -R package-ios/addons/godot_wry ios-smoke/addons/
-          cat > ios-smoke/project.godot <<'EOF'
-          [application]
-          config/name="Godot WRY iOS Smoke"
-          run/main_scene="res://main.tscn"
-          config/features=PackedStringArray("4.7", "Mobile")
-          [rendering]
-          renderer/rendering_method="mobile"
-          renderer/rendering_method.mobile="mobile"
-          EOF
-          cat > ios-smoke/main.tscn <<'EOF'
-          [gd_scene format=3]
-          [node name="Main" type="Node"]
-          EOF
-          IOS_TEMPLATE="$PWD/package-ios/godot_wry_ios/templates/4.7.stable/ios.zip"
-          cat > ios-smoke/export_presets.cfg <<EOF
-          [preset.0]
-          name="iOS"
-          platform="iOS"
-          runnable=true
-          dedicated_server=false
-          custom_features=""
-          export_filter="all_resources"
-          include_filter=""
-          exclude_filter=""
-          export_path="build/godot-wry-ios-smoke.zip"
-          [preset.0.options]
-          custom_template/debug="$IOS_TEMPLATE"
-          custom_template/release="$IOS_TEMPLATE"
-          architectures/arm64=true
-          application/app_store_team_id=""
-          application/bundle_identifier="com.openai.godotwrysmoke"
-          application/export_project_only=true
-          EOF
-          "$GODOT" --headless --editor --path ios-smoke --quit
-          "$GODOT" --headless --path ios-smoke --export-debug iOS build/godot-wry-ios-smoke.zip
-          test -f ios-smoke/build/godot-wry-ios-smoke.zip
-          mkdir -p ios-smoke/build/xcode
-          unzip -q ios-smoke/build/godot-wry-ios-smoke.zip -d ios-smoke/build/xcode
-          test "$(find ios-smoke/build/xcode -name 'libgodot_wry.xcframework' | wc -l | tr -d ' ')" -ge 1
-
-      - name: Link exported iOS project for simulator
-        shell: bash
-        run: |
-          set -euo pipefail
-          XCODEPROJ="$(find ios-smoke/build/xcode -name '*.xcodeproj' -type d | head -1)"
-          test -n "$XCODEPROJ"
-          SCHEME="$(xcodebuild -project "$XCODEPROJ" -list -json | python3 -c 'import json,sys; d=json.load(sys.stdin); print(d["project"]["schemes"][0])')"
-          xcodebuild -project "$XCODEPROJ" -scheme "$SCHEME" -configuration Debug \
-            -destination 'generic/platform=iOS Simulator' \
-            CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO build
-
-      - name: Create release ZIPs and checksums
-        run: |
-          mkdir -p release
-          (cd mobile-base && zip -qr ../release/godot_wry.zip .)
-          (cd package-android-standard && zip -qr ../release/godot_wry-android-godot4.7.zip .)
-          (cd package-android-mono && zip -qr ../release/godot_wry-android-godot4.7-mono.zip .)
-          (cd package-ios && zip -qr ../release/godot_wry-ios-godot4.7.zip .)
           cd release
-          shasum -a 256 godot_wry.zip godot_wry-android-godot4.7.zip \
-            godot_wry-android-godot4.7-mono.zip godot_wry-ios-godot4.7.zip > SHA256SUMS
+          shasum -a 256             godot_wry.zip             godot_wry-android-godot4.7.zip             godot_wry-android-godot4.7-mono.zip             godot_wry-ios-godot4.7.zip             > SHA256SUMS
           cat SHA256SUMS
-          ls -lh
+          ls -lh *.zip SHA256SUMS
 
       - name: Publish GitHub Release
         env:
@@ -261,36 +75,47 @@ jobs:
         run: |
           cat > release-notes.md <<'EOF'
           ## Godot WRY 0.3.0
+
           Mobile Releases are now self-contained for Godot 4.7.
 
           ### Android — no additional downloads
-          - Standard: `godot_wry-android-godot4.7.zip`
-          - Mono: `godot_wry-android-godot4.7-mono.zip`
+          Choose the package matching your editor:
+          - **Standard:** `godot_wry-android-godot4.7.zip`
+          - **Mono:** `godot_wry-android-godot4.7-mono.zip`
 
           Extract the matching ZIP into the project root, enable **Gradle Build**,
-          and export. The Godot 4.7 template/AARs, WRY Kotlin bridge, WryActivity,
-          and arm64-v8a/x86_64 libraries are already included.
+          and export. The official Godot 4.7 Gradle template/AARs, WRY Kotlin
+          bridge, WryActivity, and arm64-v8a/x86_64 libraries are included.
+          No separate Android Build Template download and no install.py step are
+          required.
 
-          ### iOS — templates included, device + simulator
-          `godot_wry-ios-godot4.7.zip` includes the WRY XCFramework for arm64
-          devices and arm64/x86_64 simulators, plus official Standard and Mono
-          Godot 4.7 ios.zip templates. After extraction run:
+          ### iOS — bundled templates + device/simulator XCFramework
+          `godot_wry-ios-godot4.7.zip` includes:
+          - arm64 iPhone/iPad device support.
+          - arm64 + x86_64 iOS Simulator support.
+          - official Godot 4.7 Standard and Mono `ios.zip` templates.
+          - a local-only template installer.
+
+          After extracting the ZIP into the project:
           ```bash
           python3 godot_wry_ios/install_templates.py
           ```
-          Then export iOS normally from Godot. The installer is local-only and
-          performs no network download.
 
-          CI validates Android Standard/Mono Gradle builds, Godot iOS export,
-          and an Xcode simulator build/link of the exported iOS project.
+          The installer performs no network access; it only copies the bundled
+          templates into Godot's local export-template directories.
+
+          ### CI validation
+          - Desktop, Android and iOS native builds.
+          - Godot 4.7 addon load smoke test.
+          - Android Standard and Mono Gradle template builds.
+          - Godot iOS Xcode-project export using the bundled template.
+          - Xcode iOS Simulator build/link of the exported project.
+          - SHA-256 checksums for every ZIP.
           EOF
+
           if gh release view "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
-            gh release upload "$RELEASE_TAG" release/* --clobber --repo "$GITHUB_REPOSITORY"
-            gh release edit "$RELEASE_TAG" --title "Godot WRY v0.3.0 — Self-contained Android & iOS bundles" \
-              --notes-file release-notes.md --repo "$GITHUB_REPOSITORY"
+            gh release upload "$RELEASE_TAG"               release/godot_wry.zip               release/godot_wry-android-godot4.7.zip               release/godot_wry-android-godot4.7-mono.zip               release/godot_wry-ios-godot4.7.zip               release/SHA256SUMS               --clobber               --repo "$GITHUB_REPOSITORY"
+            gh release edit "$RELEASE_TAG"               --title "Godot WRY v0.3.0 — Self-contained Android & iOS bundles"               --notes-file release-notes.md               --repo "$GITHUB_REPOSITORY"
           else
-            gh release create "$RELEASE_TAG" release/* \
-              --target "${{ github.event.workflow_run.head_sha }}" \
-              --title "Godot WRY v0.3.0 — Self-contained Android & iOS bundles" \
-              --notes-file release-notes.md --repo "$GITHUB_REPOSITORY"
+            gh release create "$RELEASE_TAG"               release/godot_wry.zip               release/godot_wry-android-godot4.7.zip               release/godot_wry-android-godot4.7-mono.zip               release/godot_wry-ios-godot4.7.zip               release/SHA256SUMS               --target "${{ github.event.workflow_run.head_sha }}"               --title "Godot WRY v0.3.0 — Self-contained Android & iOS bundles"               --notes-file release-notes.md               --repo "$GITHUB_REPOSITORY"
           fi
