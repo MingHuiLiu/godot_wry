@@ -706,6 +706,8 @@ jobs:
 
       - name: Create release ZIP files and checksums
         run: |
+          chmod +x release/godot_wry-android-godot4.7-standard/android/build/gradlew
+          chmod +x release/godot_wry-android-godot4.7-mono/android/build/gradlew
           (cd release/godot_wry && zip -qr ../godot_wry.zip .)
           (cd release/godot_wry-android-godot4.7-standard && zip -qr ../godot_wry-android-godot4.7-standard.zip .)
           (cd release/godot_wry-android-godot4.7-mono && zip -qr ../godot_wry-android-godot4.7-mono.zip .)
