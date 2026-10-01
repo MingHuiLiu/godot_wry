@@ -16,7 +16,6 @@ use {
 use {
     raw_window_handle::AppKitWindowHandle,
     std::ffi::c_void,
-    std::mem::transmute,
     std::ptr::NonNull,
     godot::classes::DisplayServer,
     godot::classes::display_server::HandleType,
@@ -94,8 +93,9 @@ impl HasWindowHandle for GodotWindow {
         unsafe {
             Ok(WindowHandle::borrow_raw(RawWindowHandle::AppKit(
                 AppKitWindowHandle::new({
-                    let ptr: *mut c_void = transmute(window_handle);
-                    NonNull::new(ptr).expect("Id<T> should never be null")
+                    let ptr: *mut c_void =
+                        std::ptr::with_exposed_provenance_mut(window_handle as usize);
+                    NonNull::new(ptr).expect("NSView should never be null")
                 }),
             )))
         }
