@@ -166,10 +166,6 @@ jobs:
         run: |
           TEMPLATE_ROOT="$RUNNER_TEMP/godot-wry-template-test"
           python3 turnkey-ios/addons/godot_wry/ios/install.py \
-            --edition standard \
-            --template-root "$TEMPLATE_ROOT"
-          python3 turnkey-ios/addons/godot_wry/ios/install.py \
-            --edition mono \
             --template-root "$TEMPLATE_ROOT"
           test -f "$TEMPLATE_ROOT/4.7.stable/ios.zip"
           test -f "$TEMPLATE_ROOT/4.7.stable.mono/ios.zip"
@@ -808,8 +804,8 @@ jobs:
           or framework copy step are required.
 
           The Release ZIP also contains both official Godot 4.7 Standard and Mono
-          `ios.zip` export templates. Install the matching bundled template offline with
-          `python addons/godot_wry/ios/install.py --edition standard` or `--edition mono`.
+          `ios.zip` export templates. Install both bundled templates offline with
+          `python addons/godot_wry/ios/install.py` (or select one with `--edition`).
           No Godot iOS template download is required. Apple's Xcode is still required
           to build and sign native iOS applications.
 
