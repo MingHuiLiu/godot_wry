@@ -6,7 +6,7 @@
 //! WebView operations over a project-local Unix-domain socket.
 
 use crate::godot_window::GodotWindow;
-use godot::classes::{Control, EditorInterface, ProjectSettings};
+use godot::classes::{display_server::HandleType, Control, DisplayServer, EditorInterface, Engine, ProjectSettings};
 use godot::obj::Singleton;
 use godot::prelude::*;
 use serde::{Deserialize, Serialize};
@@ -19,6 +19,8 @@ use std::os::unix::net::{UnixListener, UnixStream};
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 use std::sync::atomic::{AtomicU64, Ordering};
+use objc2_app_kit::NSWindow;
+use wry::WebViewExtMacOS;
 use wry::dpi::{PhysicalPosition, PhysicalSize};
 use wry::http::Request;
 use wry::{PageLoadEvent, Rect, WebContext, WebViewAttributes, WebViewBuilder};
@@ -87,6 +89,22 @@ pub enum BridgeMessage {
     },
 }
 
+fn editor_pid_for_socket() -> u32 {
+    if Engine::singleton().is_editor_hint() {
+        return std::process::id();
+    }
+
+    let args: Vec<String> = std::env::args().collect();
+    for pair in args.windows(2) {
+        if pair[0] == "--editor-pid" {
+            if let Ok(pid) = pair[1].parse::<u32>() {
+                return pid;
+            }
+        }
+    }
+    0
+}
+
 fn project_socket_path() -> PathBuf {
     let project_root = ProjectSettings::singleton()
         .globalize_path("res://")
@@ -94,8 +112,9 @@ fn project_socket_path() -> PathBuf {
     let mut hasher = DefaultHasher::new();
     project_root.hash(&mut hasher);
     std::env::temp_dir().join(format!(
-        "godot_wry_4_7_{:016x}.sock",
-        hasher.finish()
+        "godot_wry_4_7_{:016x}_{}.sock",
+        hasher.finish(),
+        editor_pid_for_socket()
     ))
 }
 
@@ -161,6 +180,7 @@ struct BridgeConnection {
     reader: BufReader<UnixStream>,
     writer: Arc<Mutex<UnixStream>>,
     hosts: HashMap<u64, HostedWebView>,
+    pending_hosts: HashMap<u64, (BridgeConfig, BridgeBounds)>,
     protocol_ok: bool,
 }
 
@@ -173,6 +193,7 @@ impl BridgeConnection {
             reader: BufReader::new(stream),
             writer: Arc::new(Mutex::new(writer_stream)),
             hosts: HashMap::new(),
+            pending_hosts: HashMap::new(),
             protocol_ok: false,
         })
     }
@@ -222,35 +243,39 @@ impl BridgeConnection {
                 }
             }
             BridgeMessage::Create { id, config, bounds } if self.protocol_ok => {
-                match HostedWebView::new(id, config, bounds, Arc::clone(&self.writer)) {
-                    Ok(host) => {
-                        self.hosts.insert(id, host);
-                    }
-                    Err(error) => self.send(&BridgeMessage::Error {
-                        id,
-                        message: error,
-                    }),
-                }
+                self.pending_hosts.insert(id, (config, bounds));
+                self.try_create_pending();
             }
             BridgeMessage::Bounds { id, bounds } => {
                 if let Some(host) = self.hosts.get_mut(&id) {
                     host.bounds = bounds;
+                    host.requested_visible = bounds.visible;
+                } else if let Some((_config, pending_bounds)) = self.pending_hosts.get_mut(&id) {
+                    *pending_bounds = bounds;
                 }
             }
             BridgeMessage::SetVisible { id, visible } => {
                 if let Some(host) = self.hosts.get_mut(&id) {
                     host.requested_visible = visible;
                     host.refresh_bounds();
+                } else if let Some((_config, bounds)) = self.pending_hosts.get_mut(&id) {
+                    bounds.visible = visible;
                 }
             }
             BridgeMessage::LoadUrl { id, url } => {
                 if let Some(host) = self.hosts.get(&id) {
                     let _ = host.webview.load_url(&url);
+                } else if let Some((config, _bounds)) = self.pending_hosts.get_mut(&id) {
+                    config.url = url;
+                    config.html.clear();
                 }
             }
             BridgeMessage::LoadHtml { id, html } => {
                 if let Some(host) = self.hosts.get(&id) {
                     let _ = host.webview.load_html(&html);
+                } else if let Some((config, _bounds)) = self.pending_hosts.get_mut(&id) {
+                    config.html = html;
+                    config.url.clear();
                 }
             }
             BridgeMessage::Eval { id, script } => {
@@ -300,8 +325,30 @@ impl BridgeConnection {
             }
             BridgeMessage::Destroy { id } => {
                 self.hosts.remove(&id);
+                self.pending_hosts.remove(&id);
             }
             BridgeMessage::Event { .. } | BridgeMessage::Error { .. } | BridgeMessage::Create { .. } => {}
+        }
+    }
+
+    fn try_create_pending(&mut self) {
+        if find_game_panel().is_none() {
+            return;
+        }
+
+        let pending_ids: Vec<u64> = self.pending_hosts.keys().copied().collect();
+        for id in pending_ids {
+            let Some((config, bounds)) = self.pending_hosts.remove(&id) else {
+                continue;
+            };
+            match HostedWebView::new(id, config, bounds, Arc::clone(&self.writer)) {
+                Ok(host) => {
+                    self.hosts.insert(id, host);
+                }
+                Err(error) => {
+                    self.send(&BridgeMessage::Error { id, message: error });
+                }
+            }
         }
     }
 }
@@ -312,6 +359,7 @@ struct HostedWebView {
     bounds: BridgeBounds,
     requested_visible: bool,
     parent_window_id: i32,
+    input_transform: Arc<Mutex<(f64, f64)>>,
 }
 
 impl HostedWebView {
@@ -335,6 +383,8 @@ impl HostedWebView {
 
         let ipc_writer = Arc::clone(&writer);
         let load_writer = Arc::clone(&writer);
+        let input_transform = Arc::new(Mutex::new((1.0f64, 1.0f64)));
+        let ipc_transform = Arc::clone(&input_transform);
         let mut builder = WebViewBuilder::with_attributes(WebViewAttributes {
             context: Some(&mut context),
             url: if config.html.is_empty() {
@@ -359,10 +409,34 @@ impl HostedWebView {
             ..Default::default()
         })
         .with_ipc_handler(move |request: Request<String>| {
+            let mut payload = request.body().clone();
+            if let Ok(mut value) = serde_json::from_str::<serde_json::Value>(&payload) {
+                let forwarded = value
+                    .get("type")
+                    .and_then(|v| v.as_str())
+                    .map(|kind| kind.starts_with('_'))
+                    .unwrap_or(false);
+                if forwarded {
+                    let (sx, sy) = ipc_transform.lock().map(|v| *v).unwrap_or((1.0, 1.0));
+                    for key in ["x", "movementX"] {
+                        if let Some(number) = value.get(key).and_then(|v| v.as_f64()) {
+                            value[key] = serde_json::json!(number * sx);
+                        }
+                    }
+                    for key in ["y", "movementY"] {
+                        if let Some(number) = value.get(key).and_then(|v| v.as_f64()) {
+                            value[key] = serde_json::json!(number * sy);
+                        }
+                    }
+                    if let Ok(encoded) = serde_json::to_string(&value) {
+                        payload = encoded;
+                    }
+                }
+            }
             let message = BridgeMessage::Event {
                 id,
                 event: "ipc".to_string(),
-                payload: request.body().clone(),
+                payload,
             };
             if let Ok(mut stream) = ipc_writer.lock() {
                 let _ = write_message(&mut stream, &message);
@@ -411,6 +485,7 @@ impl HostedWebView {
             bounds,
             requested_visible: bounds.visible,
             parent_window_id,
+            input_transform,
         };
         host.refresh_bounds();
         Ok(host)
@@ -426,15 +501,38 @@ impl HostedWebView {
             return;
         };
 
-        // If the Game workspace was moved between the main editor and a floating
-        // window, hide until the game-side node sends a fresh Create on rebuild.
-        // This avoids ever drawing into an unrelated editor window.
         if window.get_window_id() != self.parent_window_id {
-            let _ = self.webview.set_visible(false);
-            return;
+            let new_window_id = window.get_window_id();
+            let native_window = DisplayServer::singleton()
+                .window_get_native_handle_ex(HandleType::WINDOW_HANDLE)
+                .window_id(new_window_id)
+                .done();
+            let ns_window = std::ptr::with_exposed_provenance_mut::<NSWindow>(
+                native_window as usize,
+            );
+            if ns_window.is_null() || self.webview.reparent(ns_window).is_err() {
+                let _ = self.webview.set_visible(false);
+                return;
+            }
+            self.parent_window_id = new_window_id;
         }
 
         let rect = map_game_rect_to_editor(&panel, self.bounds);
+        let source_width = if self.bounds.full_window {
+            self.bounds.viewport_width.max(1) as f64
+        } else {
+            self.bounds.width.max(1.0) as f64
+        };
+        let source_height = if self.bounds.full_window {
+            self.bounds.viewport_height.max(1) as f64
+        } else {
+            self.bounds.height.max(1.0) as f64
+        };
+        if let Ok(mut transform) = self.input_transform.lock() {
+            transform.0 = source_width / rect.size.x.max(1.0) as f64;
+            transform.1 = source_height / rect.size.y.max(1.0) as f64;
+        }
+
         let scale = editor_content_scale(&panel);
         let physical = Rect {
             position: PhysicalPosition::new(
@@ -609,6 +707,7 @@ impl EditorBridgeServer {
                     for message in messages {
                         connection.handle(message);
                     }
+                    connection.try_create_pending();
                     for host in connection.hosts.values_mut() {
                         host.refresh_bounds();
                     }
