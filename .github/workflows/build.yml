@@ -180,10 +180,9 @@ jobs:
           test -f "$TEMPLATE_ROOT/4.7.stable.mono/ios.zip"
 
           python3 turnkey-ios/addons/godot_wry/ios/install.py \
-            --edition standard \
             --template-root "$HOME/Library/Application Support/Godot/export_templates"
 
-      - name: Download Godot 4.7 editor
+      - name: Download Godot 4.7 Standard and Mono editors
         run: |
           curl -L --fail --retry 3 \
             -o godot47-macos.zip \
@@ -192,6 +191,19 @@ jobs:
           GODOT_BIN="$(find godot47-editor -path '*.app/Contents/MacOS/Godot' | head -1)"
           test -x "$GODOT_BIN"
           echo "GODOT_BIN=$GODOT_BIN" >> "$GITHUB_ENV"
+
+          curl -L --fail --retry 3 \
+            -o godot47-mono-macos.zip \
+            https://github.com/godotengine/godot/releases/download/4.7-stable/Godot_v4.7-stable_mono_macos.universal.zip
+          unzip -q godot47-mono-macos.zip -d godot47-mono-editor
+          GODOT_MONO_BIN="$(find godot47-mono-editor -path '*.app/Contents/MacOS/Godot' | head -1)"
+          test -x "$GODOT_MONO_BIN"
+          echo "GODOT_MONO_BIN=$GODOT_MONO_BIN" >> "$GITHUB_ENV"
+
+      - name: Install .NET for Godot Mono iOS smoke
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: "8.0.x"
 
       - name: Smoke-test Godot 4.7 iOS project export
         run: |
@@ -290,9 +302,31 @@ jobs:
           test -f "$PBX"
           grep -q "libgodot_wry.xcframework" "$PBX"
           grep -q "gdext_rust_init" "$PBX"
+          grep -q -- "-framework WebKit" "$PBX"
 
           xcodebuild \
             -project turnkey-ios/build/GodotWryIOSSmoke.xcodeproj \
+            -configuration Debug \
+            -sdk iphonesimulator \
+            -destination 'generic/platform=iOS Simulator' \
+            CODE_SIGNING_ALLOWED=NO \
+            build
+
+      - name: Smoke-test Godot 4.7 Mono iOS project export
+        run: |
+          rm -rf turnkey-ios/.godot
+          "$GODOT_MONO_BIN" --headless --editor --path turnkey-ios --quit
+          "$GODOT_MONO_BIN" --headless --path turnkey-ios \
+            --export-debug iOS turnkey-ios/build/GodotWryIOSMonoSmoke.xcodeproj
+
+          PBX=turnkey-ios/build/GodotWryIOSMonoSmoke.xcodeproj/project.pbxproj
+          test -f "$PBX"
+          grep -q "libgodot_wry.xcframework" "$PBX"
+          grep -q "gdext_rust_init" "$PBX"
+          grep -q -- "-framework WebKit" "$PBX"
+
+          xcodebuild \
+            -project turnkey-ios/build/GodotWryIOSMonoSmoke.xcodeproj \
             -configuration Debug \
             -sdk iphonesimulator \
             -destination 'generic/platform=iOS Simulator' \
