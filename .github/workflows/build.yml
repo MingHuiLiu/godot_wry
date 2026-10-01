@@ -1,19 +1,24 @@
+name: 🤖 GDExtension
+
 on:
   push:
-    branches: main
+    branches: [main]
     paths-ignore:
       - "docs/**"
       - "**.md"
   pull_request:
     types: [opened, synchronize, reopened]
-    branches: main
+    branches: [main]
+  workflow_dispatch:
 
-name: 🤖 GDExtension
+permissions:
+  contents: read
 
 jobs:
-  build:
-    name: 🏗️ Build / ${{ matrix.platform.os-name }}
+  desktop:
+    name: 🏗️ Desktop / ${{ matrix.platform.os-name }}
     strategy:
+      fail-fast: false
       matrix:
         platform:
           - os-name: 🐧 Linux (64-bit)
@@ -26,28 +31,31 @@ jobs:
             runs-on: windows-latest
             target: x86_64-pc-windows-msvc
     runs-on: ${{ matrix.platform.runs-on }}
+
     steps:
       - name: Checkout
         uses: actions/checkout@v4
 
       - name: Install Linux dependencies
         if: ${{ matrix.platform.runs-on == 'ubuntu-latest' }}
-        run: sudo apt-get update && sudo apt-get install -y libgtk-3-dev libsoup-3.0-dev libwebkit2gtk-4.1-dev build-essential curl wget file libssl-dev libayatana-appindicator3-dev librsvg2-dev libjavascriptcoregtk-4.1-dev
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y             libgtk-3-dev libsoup-3.0-dev libwebkit2gtk-4.1-dev             build-essential curl wget file libssl-dev             libayatana-appindicator3-dev librsvg2-dev             libjavascriptcoregtk-4.1-dev
 
       - name: Install Rust
         uses: dtolnay/rust-toolchain@stable
-        if: ${{ matrix.platform.runs-on != 'windows-latest' }} # Windows uses the system Rust
         with:
           targets: ${{ matrix.platform.target == 'universal-apple-darwin' && 'aarch64-apple-darwin,x86_64-apple-darwin' || matrix.platform.target }}
 
       - name: Install Just
-        uses: extractions/setup-just@v1
+        uses: extractions/setup-just@v2
 
       - name: Build binaries
+        shell: bash
         run: just ${{ matrix.platform.target == 'universal-apple-darwin' && 'build-macos-universal' || 'build' }}
 
-      - name: Code sign and notarize library
-        if: ${{ matrix.platform.runs-on == 'macos-latest' && github.ref == 'refs/heads/main' }}
+      - name: Code sign and notarize macOS library
+        if: ${{ matrix.platform.target == 'universal-apple-darwin' && github.ref == 'refs/heads/main' }}
         env:
           APPLE_CERT_BASE64: ${{ secrets.APPLE_CERT_BASE64 }}
           APPLE_CERT_PASSWORD: ${{ secrets.APPLE_CERT_PASSWORD }}
@@ -59,35 +67,219 @@ jobs:
           brew install powershell
           pwsh ./scripts/ci_sign_macos.ps1 godot/addons/godot_wry/bin/universal-apple-darwin/libgodot_wry.framework
 
-      - name: Upload artifacts
+      - name: Stage desktop artifact
+        shell: bash
+        run: |
+          mkdir -p artifact/bin
+          cp -R "godot/addons/godot_wry/bin/${{ matrix.platform.target }}" artifact/bin/
+
+      - name: Upload desktop artifact
         uses: actions/upload-artifact@v4
         with:
-          name: ${{ matrix.platform.target }}
-          path: |
-            godot/addons/godot_wry/bin/${{ matrix.platform.target }}
+          name: desktop-${{ matrix.platform.target }}
+          path: artifact
+          if-no-files-found: error
 
-  zip:
-    name: 📦 Package
-    needs: build
-    runs-on: ubuntu-latest
+  ios:
+    name: 📱 iOS / arm64 device
+    runs-on: macos-latest
+
     steps:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Download binaries
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: aarch64-apple-ios
+
+      - name: Install Just
+        uses: extractions/setup-just@v2
+
+      - name: Build iOS xcframework
+        run: just build-ios
+
+      - name: Validate iOS package
+        run: |
+          test -f godot/addons/godot_wry/bin/aarch64-apple-ios/libgodot_wry.xcframework/Info.plist
+          test -d godot/addons/godot_wry/bin/aarch64-apple-ios/libgodot_wry.xcframework
+
+      - name: Stage iOS artifact
+        run: |
+          mkdir -p artifact/bin
+          cp -R godot/addons/godot_wry/bin/aarch64-apple-ios artifact/bin/
+
+      - name: Upload iOS artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ios-aarch64-apple-ios
+          path: artifact
+          if-no-files-found: error
+
+  android:
+    name: 🤖 Android / arm64-v8a + x86_64
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: aarch64-linux-android,x86_64-linux-android
+
+      - name: Select Android NDK
+        shell: bash
+        run: |
+          if [ -n "${ANDROID_NDK_LATEST_HOME:-}" ]; then
+            echo "ANDROID_NDK_HOME=$ANDROID_NDK_LATEST_HOME" >> "$GITHUB_ENV"
+          elif [ -n "${ANDROID_NDK_ROOT:-}" ]; then
+            echo "ANDROID_NDK_HOME=$ANDROID_NDK_ROOT" >> "$GITHUB_ENV"
+          else
+            echo "No Android NDK found on runner" >&2
+            exit 1
+          fi
+
+      - name: Install cargo-ndk
+        run: cargo install cargo-ndk --locked
+
+      - name: Prepare WRY Kotlin output
+        run: mkdir -p "$GITHUB_WORKSPACE/build/android-kotlin/com/example/godotwry"
+
+      - name: Build Android native libraries
+        working-directory: rust
+        env:
+          WRY_ANDROID_PACKAGE: com.example.godotwry
+          WRY_ANDROID_LIBRARY: godot_wry
+          WRY_ANDROID_KOTLIN_FILES_OUT_DIR: ${{ github.workspace }}/build/android-kotlin/com/example/godotwry
+        run: |
+          cargo ndk -t aarch64-linux-android -o ../godot/addons/godot_wry/bin/android build --locked --release
+          cargo ndk -t x86_64-linux-android -o ../godot/addons/godot_wry/bin/android build --locked --release
+
+      - name: Assemble Android Godot template layer
+        run: |
+          test -f godot/addons/godot_wry/bin/android/arm64-v8a/libgodot_wry.so
+          test -f godot/addons/godot_wry/bin/android/x86_64/libgodot_wry.so
+          test -f build/android-kotlin/com/example/godotwry/RustWebView.kt
+          test -f build/android-kotlin/com/example/godotwry/WryActivity.kt
+
+          # WRY generates a generic AppCompatActivity. Godot needs the customized
+          # subclass from PR #91 so its renderer and WebView can coexist.
+          cp android/WryActivity.kt build/android-kotlin/com/example/godotwry/WryActivity.kt
+
+          rm -rf godot/addons/godot_wry/android/kotlin
+          mkdir -p godot/addons/godot_wry/android/kotlin/com/example/godotwry
+          cp build/android-kotlin/com/example/godotwry/*             godot/addons/godot_wry/android/kotlin/com/example/godotwry/
+
+          grep -q "GodotActivity"             godot/addons/godot_wry/android/kotlin/com/example/godotwry/WryActivity.kt
+
+      - name: Stage Android artifact
+        run: |
+          mkdir -p artifact/bin
+          cp -R godot/addons/godot_wry/bin/android artifact/bin/
+          cp -R godot/addons/godot_wry/android artifact/
+
+      - name: Upload Android artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: android
+          path: artifact
+          if-no-files-found: error
+
+  package:
+    name: 📦 Package Godot addons
+    needs: [desktop, ios, android]
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Prepare package root
+        run: |
+          mkdir -p package/addons
+          cp -R godot/addons/godot_wry package/addons/
+
+      - name: Download Linux binaries
         uses: actions/download-artifact@v4
         with:
-          path: godot/addons/godot_wry/bin
+          name: desktop-x86_64-unknown-linux-gnu
+          path: package/addons/godot_wry
 
-      - name: Clean files
+      - name: Download macOS binaries
+        uses: actions/download-artifact@v4
+        with:
+          name: desktop-universal-apple-darwin
+          path: package/addons/godot_wry
+
+      - name: Download Windows binaries
+        uses: actions/download-artifact@v4
+        with:
+          name: desktop-x86_64-pc-windows-msvc
+          path: package/addons/godot_wry
+
+      - name: Download iOS binaries
+        uses: actions/download-artifact@v4
+        with:
+          name: ios-aarch64-apple-ios
+          path: package/addons/godot_wry
+
+      - name: Download Android binaries and template layer
+        uses: actions/download-artifact@v4
+        with:
+          name: android
+          path: package/addons/godot_wry
+
+      - name: Validate aggregate package
         run: |
-          mkdir -p package/godot_wry
-          mv godot/addons package/godot_wry
+          test -f package/addons/godot_wry/WRY.gdextension
+          test -f package/addons/godot_wry/bin/x86_64-unknown-linux-gnu/libgodot_wry.so
+          test -d package/addons/godot_wry/bin/universal-apple-darwin/libgodot_wry.framework
+          test -f package/addons/godot_wry/bin/x86_64-pc-windows-msvc/godot_wry.dll
+          test -d package/addons/godot_wry/bin/aarch64-apple-ios/libgodot_wry.xcframework
+          test -f package/addons/godot_wry/bin/android/arm64-v8a/libgodot_wry.so
+          test -f package/addons/godot_wry/bin/android/x86_64/libgodot_wry.so
+          test -f package/addons/godot_wry/android/kotlin/com/example/godotwry/RustWebView.kt
+          test -f package/addons/godot_wry/android/kotlin/com/example/godotwry/WryActivity.kt
 
-      - name: Upload artifact
+          # Smoke-test the Android installer against an existing-project layout.
+          touch package/project.godot
+          mkdir -p package/android/build
+          touch package/android/build/build.gradle
+          (
+            cd package
+            python3 addons/godot_wry/android/install.py
+          )
+          grep -q 'addons/godot_wry/android/godot_wry.gradle' package/android/build/build.gradle
+          rm -rf package/project.godot package/android
+
+      - name: Create platform packages
+        run: |
+          cp -R package package-android
+          cp -R package package-ios
+
+          find package-android/addons/godot_wry/bin -mindepth 1 -maxdepth 1             ! -name android -exec rm -rf {} +
+          find package-ios/addons/godot_wry/bin -mindepth 1 -maxdepth 1             ! -name aarch64-apple-ios -exec rm -rf {} +
+          rm -rf package-ios/addons/godot_wry/android/kotlin
+
+      - name: Upload all-platform Godot addon
         uses: actions/upload-artifact@v4
         with:
           name: godot_wry
           path: package
+          if-no-files-found: error
 
-  #TODO: release:
+      - name: Upload Android Godot package
+        uses: actions/upload-artifact@v4
+        with:
+          name: godot_wry-android
+          path: package-android
+          if-no-files-found: error
+
+      - name: Upload iOS Godot package
+        uses: actions/upload-artifact@v4
+        with:
+          name: godot_wry-ios
+          path: package-ios
+          if-no-files-found: error
