@@ -24,6 +24,13 @@ def copy_addon(repo: Path, output: Path, addon_source: Path | None) -> None:
     shutil.copytree(source, target)
 
 
+def copy_godot_license(repo: Path, output: Path) -> None:
+    source = repo / "third_party" / "godot" / "LICENSE.txt"
+    target = output / "THIRD_PARTY_NOTICES" / "GODOT_LICENSE.txt"
+    target.parent.mkdir(parents=True, exist_ok=True)
+    shutil.copy2(source, target)
+
+
 def extract_android_template(source_zip: Path, output: Path, template_id: str) -> None:
     android_root = output / "android"
     build_root = android_root / "build"
@@ -66,6 +73,7 @@ def validate(output: Path) -> None:
         output / "android" / "build" / "build.gradle",
         output / "android" / "build" / "gradlew",
         output / "android" / ".build_version",
+        output / "THIRD_PARTY_NOTICES" / "GODOT_LICENSE.txt",
     ]
     missing = [str(path) for path in required if not path.exists()]
     if missing:
@@ -103,6 +111,7 @@ def main() -> int:
 
     addon_source = args.addon_source.resolve() if args.addon_source else None
     copy_addon(repo, output, addon_source)
+    copy_godot_license(repo, output)
     extract_android_template(args.android_source.resolve(), output, args.template_id)
     install_wry(output)
     validate(output)

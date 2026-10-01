@@ -71,9 +71,9 @@ build-ios:
 		-library ./target/aarch64-apple-ios/release/libgodot_wry.a \
 		-library ./target/ios-xcframework/simulator/libgodot_wry.a \
 		-output ./target/ios-xcframework/libgodot_wry.xcframework
-	mkdir -p ../godot/addons/godot_wry/bin/aarch64-apple-ios
-	rm -rf ../godot/addons/godot_wry/bin/aarch64-apple-ios/libgodot_wry.xcframework
-	cp -R ./target/ios-xcframework/libgodot_wry.xcframework ../godot/addons/godot_wry/bin/aarch64-apple-ios/
+	mkdir -p ../godot/addons/godot_wry/bin/ios
+	rm -rf ../godot/addons/godot_wry/bin/ios/libgodot_wry.xcframework
+	cp -R ./target/ios-xcframework/libgodot_wry.xcframework ../godot/addons/godot_wry/bin/ios/
 
 build-android:
 	@echo "Building Android arm64-v8a and x86_64 libraries..."

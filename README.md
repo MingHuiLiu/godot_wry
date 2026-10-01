@@ -58,7 +58,7 @@ For mobile projects, use the **turnkey** package that matches your target:
 - `godot_wry.zip` — all-platform addon binaries.
 - `godot_wry-android-godot4.7-standard.zip` — Android turnkey package for Godot 4.7 Standard.
 - `godot_wry-android-godot4.7-mono.zip` — Android turnkey package for Godot 4.7 Mono/.NET.
-- `godot_wry-ios-godot4.7.zip` — iOS turnkey package with device + simulator support.
+- `godot_wry-ios-godot4.7.zip` — iOS turnkey package with device + simulator support and bundled Godot 4.7 Standard/Mono iOS export templates.
 
 The Android turnkey ZIPs are rooted at the **Godot project root**. Extract the
 matching ZIP over your project and enable **Gradle Build** in the Android export
@@ -72,18 +72,28 @@ Build Template, debug/release AARs, Gradle wrapper, WRY Kotlin bridge,
 Choose the Standard or Mono Android ZIP to match the Godot editor/export-template
 edition used by the project.
 
-The iOS turnkey ZIP can also be extracted directly into the project. Godot 4.7
-links the included static XCFramework automatically. It contains arm64 device,
-arm64 simulator, and x86_64 simulator slices, so no WRY-specific Xcode project
-editing or framework copy step is required. Xcode and the normal official Godot
-iOS export template are still required, just as for any Godot iOS export.
+The iOS turnkey ZIP can also be extracted directly into the project. It bundles
+both official Godot 4.7 **Standard** and **Mono/.NET** `ios.zip` export templates,
+so no additional Godot template download is required. Install the bundled
+template matching your editor once:
+
+```sh
+python addons/godot_wry/ios/install.py --edition standard
+# or
+python addons/godot_wry/ios/install.py --edition mono
+```
+
+Godot 4.7 then links the included static XCFramework automatically. It contains
+arm64 device, arm64 simulator, and x86_64 simulator slices, so no WRY-specific
+Xcode project editing or framework copy step is required. Apple's Xcode is still
+required to build/sign iOS applications, as with any native iOS project.
 
 All mobile turnkey packages retain the desktop host binaries so the same project
 can be opened and tested in the desktop Godot editor before exporting to mobile.
 
 ### Godot 4.7 embedded Game workspace
 
-Godot WRY 0.2.0 supports running the game inside the editor's **Game** workspace.
+Godot WRY 0.3.0 supports running the game inside the editor's **Game** workspace.
 
 - **Windows / Linux:** WRY attaches to the native game child window that Godot embeds in the editor.
 - **macOS:** Godot 4.7 renders embedded games through a cross-process `CAContext/CALayer`, so the game process no longer owns an `NSView` that can host `WKWebView`. Godot WRY detects `Engine.is_embedded_in_editor()` and automatically mirrors WebView state to the editor process over a project-local Unix socket. The editor-hosted WKWebView is positioned over the visible `GamePanel`.
@@ -114,7 +124,7 @@ Please refer to the [Docs](https://godot-wry.doce.sh) for API reference and in-d
 | **Mac (Intel, Apple Sillicon)** | ✅ Supported   | WebKit                     |
 | **Linux (X11)**                 | 🚧 Supported\* | WebKitGTK                  |
 | **Android (arm64, x86_64)**     | 🚧 Supported\* | Android WebView (Chromium) |
-| **iOS (arm64 device)**          | 🚧 Supported\* | WebKit                     |
+| **iOS (device + simulator)**    | 🚧 Supported\* | WebKit                     |
 | **Browser/HTML5**               | ⏳ Planned     | —                          |
 
 ### Linux
@@ -137,8 +147,10 @@ not needed with the turnkey Release ZIPs.
 ### iOS
 
 iOS uses a **static XCFramework**. The Release includes arm64 device plus
-arm64/x86_64 simulator slices. Godot 4.7's Apple Embedded GDExtension exporter
-links the library and registers the GDExtension entry symbol automatically.
+arm64/x86_64 simulator slices. The same Release ZIP also contains the official
+Godot 4.7 Standard and Mono iOS export templates for offline installation.
+Godot 4.7's Apple Embedded GDExtension exporter links the library and registers
+the GDExtension entry symbol automatically.
 
 ## ❌ Caveats
 
@@ -146,7 +158,6 @@ links the library and registers the GDExtension entry symbol automatically.
 - Webview always renders on top
 - Different browser engines across platforms
 - No automatic dependency checks
-- iOS support is device-only for now
 
 You can learn more about these caveats on the [Caveats](https://godot-wry.doce.sh/about/caveats.html) documentation page.
 

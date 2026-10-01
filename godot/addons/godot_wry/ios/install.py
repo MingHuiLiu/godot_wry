@@ -45,11 +45,11 @@ def main() -> int:
     args = parser.parse_args()
 
     script_dir = Path(__file__).resolve().parent
-    bundled = script_dir / "templates" / "ios.zip"
+    bundled = script_dir / "templates" / args.edition / "ios.zip"
     if not bundled.is_file():
         print(
-            "[godot_wry] Bundled ios.zip is missing. "
-            "Use a turnkey iOS Release package.",
+            f"[godot_wry] Bundled {args.edition} ios.zip is missing. "
+            "Use the Godot 4.7 turnkey iOS Release package.",
             file=sys.stderr,
         )
         return 2

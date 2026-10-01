@@ -1,10 +1,13 @@
 # iOS turnkey package
 
-The edition-specific GitHub Release packages bundle Godot 4.7's official
-`ios.zip` export template alongside Godot WRY.
+The GitHub iOS turnkey Release package bundles both official Godot 4.7
+`ios.zip` export templates alongside Godot WRY:
+
+- Standard
+- Mono/.NET
 
 After extracting the package into a Godot project, install the bundled template
-once (no network download):
+matching your editor once (no network download):
 
 ```bash
 python addons/godot_wry/ios/install.py --edition standard

@@ -137,15 +137,42 @@ jobs:
           name: desktop-x86_64-pc-windows-msvc
           path: turnkey-ios/addons/godot_wry
 
-      - name: Install Godot 4.7 iOS export template
+      - name: Bundle official Godot 4.7 iOS export templates
         run: |
+          mkdir -p \
+            turnkey-ios/addons/godot_wry/ios/templates/standard \
+            turnkey-ios/addons/godot_wry/ios/templates/mono \
+            turnkey-ios/THIRD_PARTY_NOTICES
+
           python3 scripts/fetch_remote_zip_member.py \
             https://github.com/godotengine/godot/releases/download/4.7-stable/Godot_v4.7-stable_export_templates.tpz \
             templates/ios.zip \
-            ios.zip
-          TEMPLATE_DIR="$HOME/Library/Application Support/Godot/export_templates/4.7.stable"
-          mkdir -p "$TEMPLATE_DIR"
-          cp ios.zip "$TEMPLATE_DIR/ios.zip"
+            turnkey-ios/addons/godot_wry/ios/templates/standard/ios.zip
+
+          python3 scripts/fetch_remote_zip_member.py \
+            https://github.com/godotengine/godot/releases/download/4.7-stable/Godot_v4.7-stable_mono_export_templates.tpz \
+            templates/ios.zip \
+            turnkey-ios/addons/godot_wry/ios/templates/mono/ios.zip
+
+          python3 -m zipfile -t turnkey-ios/addons/godot_wry/ios/templates/standard/ios.zip
+          python3 -m zipfile -t turnkey-ios/addons/godot_wry/ios/templates/mono/ios.zip
+          cp third_party/godot/LICENSE.txt turnkey-ios/THIRD_PARTY_NOTICES/GODOT_LICENSE.txt
+
+      - name: Validate offline iOS template installer
+        run: |
+          TEMPLATE_ROOT="$RUNNER_TEMP/godot-wry-template-test"
+          python3 turnkey-ios/addons/godot_wry/ios/install.py \
+            --edition standard \
+            --template-root "$TEMPLATE_ROOT"
+          python3 turnkey-ios/addons/godot_wry/ios/install.py \
+            --edition mono \
+            --template-root "$TEMPLATE_ROOT"
+          test -f "$TEMPLATE_ROOT/4.7.stable/ios.zip"
+          test -f "$TEMPLATE_ROOT/4.7.stable.mono/ios.zip"
+
+          python3 turnkey-ios/addons/godot_wry/ios/install.py \
+            --edition standard \
+            --template-root "$HOME/Library/Application Support/Godot/export_templates"
 
       - name: Download Godot 4.7 editor
         run: |
@@ -741,7 +768,7 @@ jobs:
           - `godot_wry.zip` — all-platform addon binaries.
           - `godot_wry-android-godot4.7-standard.zip` — **turnkey Android package for Godot 4.7 Standard**.
           - `godot_wry-android-godot4.7-mono.zip` — **turnkey Android package for Godot 4.7 Mono/.NET**.
-          - `godot_wry-ios-godot4.7.zip` — **turnkey iOS package**, including static device + simulator XCFramework.
+          - `godot_wry-ios-godot4.7.zip` — **turnkey iOS package**, including static device + simulator XCFramework plus bundled Godot 4.7 Standard/Mono iOS export templates.
           - `SHA256SUMS` — release checksums.
 
           ### Android: no Build Template install and no WRY installer
@@ -773,11 +800,14 @@ jobs:
           - Intel simulator x86_64
 
           Godot 4.7's Apple Embedded GDExtension exporter links the static XCFramework
-          directly and registers `gdext_rust_init`; no WRY-specific Xcode project edits,
-          framework copy step, or installer are required.
+          directly and registers `gdext_rust_init`; no WRY-specific Xcode project edits
+          or framework copy step are required.
 
-          A normal Godot iOS export still requires Apple's Xcode and the official Godot
-          iOS export template, as any Godot iOS project does.
+          The Release ZIP also contains both official Godot 4.7 Standard and Mono
+          `ios.zip` export templates. Install the matching bundled template offline with
+          `python addons/godot_wry/ios/install.py --edition standard` or `--edition mono`.
+          No Godot iOS template download is required. Apple's Xcode is still required
+          to build and sign native iOS applications.
 
           ### CI validation
 

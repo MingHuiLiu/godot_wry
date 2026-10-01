@@ -11,6 +11,8 @@ import argparse
 import binascii
 import struct
 import sys
+import time
+import urllib.error
 import urllib.request
 import zlib
 from pathlib import Path
@@ -22,18 +24,62 @@ USER_AGENT = "godot-wry-ci/0.3"
 
 
 def get_range(url: str, start: int, end: int) -> tuple[bytes, dict[str, str], int]:
-    req = urllib.request.Request(
-        url,
-        headers={
-            "Range": f"bytes={start}-{end}",
-            "User-Agent": USER_AGENT,
-            "Accept": "*/*",
-        },
-    )
-    with urllib.request.urlopen(req, timeout=120) as response:
-        data = response.read()
-        headers = {k.lower(): v for k, v in response.headers.items()}
-        return data, headers, response.status
+    last_error: Exception | None = None
+    for attempt in range(5):
+        req = urllib.request.Request(
+            url,
+            headers={
+                "Range": f"bytes={start}-{end}",
+                "User-Agent": USER_AGENT,
+                "Accept": "*/*",
+            },
+        )
+        try:
+            with urllib.request.urlopen(req, timeout=120) as response:
+                data = response.read()
+                headers = {k.lower(): v for k, v in response.headers.items()}
+                return data, headers, response.status
+        except urllib.error.HTTPError as exc:
+            last_error = exc
+            if exc.code not in {429, 500, 502, 503, 504}:
+                raise
+        except (urllib.error.URLError, TimeoutError) as exc:
+            last_error = exc
+
+        if attempt < 4:
+            delay = 2 ** attempt
+            print(
+                f"Range {start}-{end} failed ({last_error}); retrying in {delay}s...",
+                file=sys.stderr,
+            )
+            time.sleep(delay)
+
+    assert last_error is not None
+    raise last_error
+
+
+def get_range_chunked(
+    url: str, start: int, end: int, chunk_size: int = 16 * 1024 * 1024
+) -> bytes:
+    chunks: list[bytes] = []
+    current = start
+    while current <= end:
+        chunk_end = min(end, current + chunk_size - 1)
+        data, _, status = get_range(url, current, chunk_end)
+        if status != 206:
+            raise RuntimeError(
+                f"Server did not honor Range request {current}-{chunk_end} "
+                f"(status={status})"
+            )
+        expected = chunk_end - current + 1
+        if len(data) != expected:
+            raise RuntimeError(
+                f"Range length mismatch for {current}-{chunk_end}: "
+                f"expected {expected}, got {len(data)}"
+            )
+        chunks.append(data)
+        current = chunk_end + 1
+    return b"".join(chunks)
 
 
 def remote_size(url: str) -> int:
@@ -116,11 +162,9 @@ def extract_member(url: str, member: str, output: Path) -> None:
     name_len = struct.unpack_from("<H", header, 26)[0]
     extra_len = struct.unpack_from("<H", header, 28)[0]
     data_start = local_offset + 30 + name_len + extra_len
-    compressed, _, status = get_range(
+    compressed = get_range_chunked(
         url, data_start, data_start + compressed_size - 1
     )
-    if status != 206:
-        raise RuntimeError("Could not download compressed ZIP member")
 
     if method == 0:
         payload = compressed
