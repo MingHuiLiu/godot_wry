@@ -42,8 +42,6 @@ windows.release.x86_64 = { "bin/x86_64-pc-windows-msvc/godot_wry.dll" : "" }
 linux.debug.x86_64 = { "bin/x86_64-unknown-linux-gnu/libgodot_wry.so": "" }
 linux.release.x86_64 = { "bin/x86_64-unknown-linux-gnu/libgodot_wry.so": "" }
 
-ios.debug = { "bin/ios/libgodot_wry.xcframework": "" }
-ios.release = { "bin/ios/libgodot_wry.xcframework": "" }
 
 android.arm64 = { "bin/android/arm64-v8a/libgodot_wry.so": "" }
 android.x86_64 = { "bin/android/x86_64/libgodot_wry.so": "" }
