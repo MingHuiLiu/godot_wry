@@ -459,34 +459,11 @@ jobs:
           ./Godot_v4.7-stable_linux.x86_64 --headless --path smoke 2>&1 | tee godot47-smoke.log
           grep -q "GODOT_WRY_47_SMOKE_OK" godot47-smoke.log
 
-      - name: Create platform packages
-        run: |
-          cp -R package package-android
-          cp -R package package-ios
-
-          find package-android/addons/godot_wry/bin -mindepth 1 -maxdepth 1             ! -name android -exec rm -rf {} +
-          find package-ios/addons/godot_wry/bin -mindepth 1 -maxdepth 1             ! -name ios -exec rm -rf {} +
-          rm -rf package-ios/addons/godot_wry/android/kotlin
-
       - name: Upload all-platform Godot addon
         uses: actions/upload-artifact@v4
         with:
           name: godot_wry
           path: package
-          if-no-files-found: error
-
-      - name: Upload Android Godot package
-        uses: actions/upload-artifact@v4
-        with:
-          name: godot_wry-android
-          path: package-android
-          if-no-files-found: error
-
-      - name: Upload iOS Godot package
-        uses: actions/upload-artifact@v4
-        with:
-          name: godot_wry-ios
-          path: package-ios
           if-no-files-found: error
 
   android-turnkey:
