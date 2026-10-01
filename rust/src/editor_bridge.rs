@@ -437,15 +437,15 @@ impl HostedWebView {
                     }
                 }
             }
+            if !payload.starts_with("{\"type\":\"_") {
+                godot_print!("[Godot WRY] Editor bridge IPC id={id}: {payload}");
+            }
             let message = BridgeMessage::Event {
                 id,
                 event: "ipc".to_string(),
                 payload,
             };
             if let Ok(mut stream) = ipc_writer.lock() {
-                if !payload.starts_with("{\"type\":\"_") {
-                    godot_print!("[Godot WRY] Editor bridge IPC id={id}: {payload}");
-                }
                 let _ = write_message(&mut stream, &message);
             }
         })
