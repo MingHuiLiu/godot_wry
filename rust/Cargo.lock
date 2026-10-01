@@ -717,6 +717,7 @@ dependencies = [
  "http",
  "jni",
  "lazy_static",
+ "libc",
  "ndk",
  "ndk-context",
  "ndk-sys",
