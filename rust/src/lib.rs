@@ -965,17 +965,22 @@ impl WebView {
 
     #[cfg(target_os = "macos")]
     fn bridge_bounds(&self) -> editor_bridge::BridgeBounds {
-        let viewport = self.current_viewport_size();
+        let fallback = self.current_viewport_size();
+        let logical_viewport = self.base().get_viewport()
+            .map(|viewport| viewport.get_visible_rect().size)
+            .unwrap_or(Vector2::new(fallback.x as f32, fallback.y as f32));
+        let viewport_width = logical_viewport.x.round().max(1.0) as i32;
+        let viewport_height = logical_viewport.y.round().max(1.0) as i32;
         let (x, y, width, height) = if self.full_window_size {
-            (0.0, 0.0, viewport.x as f32, viewport.y as f32)
+            (0.0, 0.0, viewport_width as f32, viewport_height as f32)
         } else {
             let position = self.base().get_global_position();
             let size = self.base().get_size();
             (position.x, position.y, size.x, size.y)
         };
         editor_bridge::BridgeBounds {
-            viewport_width: viewport.x,
-            viewport_height: viewport.y,
+            viewport_width,
+            viewport_height,
             x,
             y,
             width,
