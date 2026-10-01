@@ -1,6 +1,6 @@
 [configuration]
 entry_symbol = "gdext_rust_init"
-compatibility_minimum = 4.1
+compatibility_minimum = 4.2
 reloadable = true
 
 [libraries]
@@ -13,11 +13,22 @@ macos.release    = "bin/universal-apple-darwin/libgodot_wry.framework"
 windows.debug.x86_64   = "bin/x86_64-pc-windows-msvc/godot_wry.dll"
 windows.release.x86_64 = "bin/x86_64-pc-windows-msvc/godot_wry.dll"
 
+ios.debug   = "bin/aarch64-apple-ios/libgodot_wry.xcframework"
+ios.release = "bin/aarch64-apple-ios/libgodot_wry.xcframework"
+
+# Android native libraries. Plain keys are kept for Godot Android loaders that
+# resolve architecture before the debug/release feature tag is applied.
+android.arm64          = "bin/android/arm64-v8a/libgodot_wry.so"
+android.x86_64         = "bin/android/x86_64/libgodot_wry.so"
+android.debug.arm64    = "bin/android/arm64-v8a/libgodot_wry.so"
+android.release.arm64  = "bin/android/arm64-v8a/libgodot_wry.so"
+android.debug.x86_64   = "bin/android/x86_64/libgodot_wry.so"
+android.release.x86_64 = "bin/android/x86_64/libgodot_wry.so"
+
 [icons]
 WebView = "icons/webview.svg"
 
 [dependencies]
-
 macos.debug = {
   "bin/universal-apple-darwin/libgodot_wry.framework" : "Contents/Frameworks"
 }
@@ -30,3 +41,13 @@ windows.release.x86_64 = { "bin/x86_64-pc-windows-msvc/godot_wry.dll" : "" }
 
 linux.debug.x86_64 = { "bin/x86_64-unknown-linux-gnu/libgodot_wry.so": "" }
 linux.release.x86_64 = { "bin/x86_64-unknown-linux-gnu/libgodot_wry.so": "" }
+
+ios.debug = { "bin/aarch64-apple-ios/libgodot_wry.xcframework": "" }
+ios.release = { "bin/aarch64-apple-ios/libgodot_wry.xcframework": "" }
+
+android.arm64 = { "bin/android/arm64-v8a/libgodot_wry.so": "" }
+android.x86_64 = { "bin/android/x86_64/libgodot_wry.so": "" }
+android.debug.arm64 = { "bin/android/arm64-v8a/libgodot_wry.so": "" }
+android.release.arm64 = { "bin/android/arm64-v8a/libgodot_wry.so": "" }
+android.debug.x86_64 = { "bin/android/x86_64/libgodot_wry.so": "" }
+android.release.x86_64 = { "bin/android/x86_64/libgodot_wry.so": "" }
