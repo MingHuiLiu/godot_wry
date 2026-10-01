@@ -461,9 +461,6 @@ impl HostedWebView {
                     }
                 }
             }
-            if !payload.starts_with("{\"type\":\"_") {
-                godot_print!("[Godot WRY] Editor bridge IPC id={id}: {payload}");
-            }
             let message = BridgeMessage::Event {
                 id,
                 event: "ipc".to_string(),
