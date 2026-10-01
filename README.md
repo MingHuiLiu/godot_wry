@@ -51,23 +51,35 @@ The easiest way to install Godot WRY is through Godot's [Asset Library](https://
 4. Click on the Godot WRY extension and click **Download**.
 5. In the configuration dialog, click **Install**.
 
-### GitHub Actions / releases
+### GitHub Releases
 
-The build workflow and GitHub Releases publish three ready-to-use packages:
+For mobile projects, use the **turnkey** package that matches your target:
 
-- `godot_wry` — all desktop + Android + iOS binaries.
-- `godot_wry-android` — Android arm64-v8a/x86_64 binaries plus the WRY Kotlin/Gradle integration.
-- `godot_wry-ios` — the iOS arm64 device xcframework.
+- `godot_wry.zip` — all-platform addon binaries.
+- `godot_wry-android-godot4.7-standard.zip` — Android turnkey package for Godot 4.7 Standard.
+- `godot_wry-android-godot4.7-mono.zip` — Android turnkey package for Godot 4.7 Mono/.NET.
+- `godot_wry-ios-godot4.7.zip` — iOS turnkey package with device + simulator support.
 
-Each artifact is rooted at `addons/godot_wry`, so extract it directly into an existing Godot project.
+The Android turnkey ZIPs are rooted at the **Godot project root**. Extract the
+matching ZIP over your project and enable **Gradle Build** in the Android export
+preset. The package already contains the official matching Godot 4.7 Gradle
+Build Template, debug/release AARs, Gradle wrapper, WRY Kotlin bridge,
+`WryActivity`, and WRY native libraries.
 
-For Android, install Godot's Android Build Template once, then run:
+**Do not install a separate Android Build Template and do not run
+`addons/godot_wry/android/install.py` when using a turnkey ZIP.**
 
-```sh
-python addons/godot_wry/android/install.py
-```
+Choose the Standard or Mono Android ZIP to match the Godot editor/export-template
+edition used by the project.
 
-After that, export Android with **Gradle Build** enabled.
+The iOS turnkey ZIP can also be extracted directly into the project. Godot 4.7
+links the included static XCFramework automatically. It contains arm64 device,
+arm64 simulator, and x86_64 simulator slices, so no WRY-specific Xcode project
+editing or framework copy step is required. Xcode and the normal official Godot
+iOS export template are still required, just as for any Godot iOS export.
+
+All mobile turnkey packages retain the desktop host binaries so the same project
+can be opened and tested in the desktop Godot editor before exporting to mobile.
 
 ### Godot 4.7 embedded Game workspace
 
@@ -113,11 +125,20 @@ Please refer to the [Docs](https://godot-wry.doce.sh) for API reference and in-d
 
 ### Android
 
-\* Android support uses WRY's native Android bridge and requires Godot's Gradle-based Android Build Template. The packaged `install.py` wires the generated Kotlin bridge and WRY-compatible `GodotActivity` subclass into an existing project. Native packages are built for arm64-v8a devices and x86_64 emulators.
+Android uses WRY's native Kotlin/JNI bridge and a WRY-compatible `GodotActivity`
+subclass. The turnkey Release packages include a pre-integrated Godot 4.7 custom
+Gradle build for arm64-v8a devices and x86_64 emulators. Separate Standard and
+Mono packages keep the bundled Godot runtime aligned with the project edition.
+
+The standalone `addons/godot_wry/android/install.py` is retained for advanced
+users who intentionally maintain their own custom Android Build Template; it is
+not needed with the turnkey Release ZIPs.
 
 ### iOS
 
-\* iOS exports currently ship a device-only arm64 xcframework. Simulator slices are not included yet. Build locally on macOS with Xcode using `just build-ios`.
+iOS uses a **static XCFramework**. The Release includes arm64 device plus
+arm64/x86_64 simulator slices. Godot 4.7's Apple Embedded GDExtension exporter
+links the library and registers the GDExtension entry symbol automatically.
 
 ## ❌ Caveats
 
