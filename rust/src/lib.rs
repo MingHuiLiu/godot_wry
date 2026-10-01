@@ -294,7 +294,7 @@ impl WebView {
         let viewport_size = self.base().get_window()
             .map(|w| w.get_size())
             .unwrap_or_else(|| {
-                self.base().get_tree().get_root().expect("Could not get root viewport").get_size()
+                self.base().get_tree().get_root().get_size()
             });
         let window_position = DisplayServer::singleton().window_get_position_ex().window_id(self.window_id).done();
         let content_scale_factor = self.base().get_window()
@@ -911,7 +911,7 @@ impl WebView {
         }
         godot_print!("[Godot WRY] create_webview succeeded!");
 
-        let mut viewport = self.base().get_tree().get_root().expect("Could not get root viewport");
+        let mut viewport = self.base().get_tree().get_root();
         viewport.connect("size_changed", &Callable::from_object_method(&*self.base(), "resize"));
 
         self.base().clone().connect("resized", &Callable::from_object_method(&*self.base(), "resize"));
@@ -935,7 +935,6 @@ impl WebView {
             .map(|w| w.get_size())
             .unwrap_or_else(|| {
                 self.base().get_tree().get_root()
-                    .expect("Could not get root viewport")
                     .get_size()
             })
     }
@@ -1054,14 +1053,18 @@ impl WebView {
                                 );
                             }
                         }
-                        "page_load_started" => self.base().clone().call_deferred(
-                            "emit_signal",
-                            &["page_load_started".to_variant(), payload.to_variant()],
-                        ),
-                        "page_load_finished" => self.base().clone().call_deferred(
-                            "emit_signal",
-                            &["page_load_finished".to_variant(), payload.to_variant()],
-                        ),
+                        "page_load_started" => {
+                            self.base().clone().call_deferred(
+                                "emit_signal",
+                                &["page_load_started".to_variant(), payload.to_variant()],
+                            );
+                        }
+                        "page_load_finished" => {
+                            self.base().clone().call_deferred(
+                                "emit_signal",
+                                &["page_load_finished".to_variant(), payload.to_variant()],
+                            );
+                        }
                         _ => {}
                     }
                 }
@@ -1137,7 +1140,7 @@ impl WebView {
                 let window_size = self.base().get_window()
                     .map(|w| w.get_size())
                     .unwrap_or_else(|| {
-                        self.base().get_tree().get_root().expect("Could not get root viewport").get_size()
+                        self.base().get_tree().get_root().get_size()
                     });
                 Rect {
                     position: PhysicalPosition::new(0, 0).into(),
