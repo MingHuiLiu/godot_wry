@@ -79,7 +79,7 @@ jobs:
             archive="$1"
             suffix="$2"
             output="$3"
-            member="$(unzip -Z1 "$archive" | grep -E "(^|/)\${suffix}$" | head -1)"
+            member="$(unzip -Z1 "$archive" | grep -E "(^|/)${suffix}$" | head -1)"
             if [ -z "$member" ]; then
               echo "Could not find $suffix in $archive" >&2
               exit 1
