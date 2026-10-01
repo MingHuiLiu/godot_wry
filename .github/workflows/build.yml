@@ -667,6 +667,7 @@ jobs:
           name: ${{ matrix.artifact_name }}
           path: turnkey
           if-no-files-found: error
+          include-hidden-files: true
 
   release:
     name: 🚀 Publish GitHub Release
