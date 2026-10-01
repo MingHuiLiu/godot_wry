@@ -263,6 +263,11 @@ jobs:
             CODE_SIGNING_ALLOWED=NO \
             build
 
+      - name: Remove iOS smoke-only project files
+        run: |
+          rm -rf turnkey-ios/.godot turnkey-ios/build
+          rm -f turnkey-ios/project.godot turnkey-ios/main.tscn turnkey-ios/export_presets.cfg
+
       - name: Stage iOS intermediate artifact
         run: |
           mkdir -p artifact/bin
