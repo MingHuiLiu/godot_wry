@@ -18,6 +18,7 @@ use std::io::{self, BufRead, BufReader, Write};
 use std::os::unix::net::{UnixListener, UnixStream};
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
+use std::sync::atomic::{AtomicU64, Ordering};
 use wry::dpi::{PhysicalPosition, PhysicalSize};
 use wry::http::Request;
 use wry::{PageLoadEvent, Rect, WebContext, WebViewAttributes, WebViewBuilder};
@@ -106,8 +107,8 @@ fn write_message(stream: &mut UnixStream, message: &BridgeMessage) -> io::Result
 }
 
 pub struct EditorBridgeClient {
-    reader: BufReader<UnixStream>,
-    writer: UnixStream,
+    reader: RefCell<BufReader<UnixStream>>,
+    writer: Mutex<UnixStream>,
 }
 
 impl EditorBridgeClient {
@@ -116,9 +117,9 @@ impl EditorBridgeClient {
         stream.set_nonblocking(true)?;
         let mut writer = stream.try_clone()?;
         writer.set_nonblocking(false)?;
-        let mut client = Self {
-            reader: BufReader::new(stream),
-            writer,
+        let client = Self {
+            reader: RefCell::new(BufReader::new(stream)),
+            writer: Mutex::new(writer),
         };
         client.send(&BridgeMessage::Hello {
             version: BRIDGE_PROTOCOL_VERSION,
@@ -126,15 +127,19 @@ impl EditorBridgeClient {
         Ok(client)
     }
 
-    pub fn send(&mut self, message: &BridgeMessage) -> io::Result<()> {
-        write_message(&mut self.writer, message)
+    pub fn send(&self, message: &BridgeMessage) -> io::Result<()> {
+        let mut writer = self.writer.lock().map_err(|_| {
+            io::Error::new(io::ErrorKind::BrokenPipe, "editor bridge writer poisoned")
+        })?;
+        write_message(&mut writer, message)
     }
 
-    pub fn poll(&mut self) -> io::Result<Vec<BridgeMessage>> {
+    pub fn poll(&self) -> io::Result<Vec<BridgeMessage>> {
         let mut messages = Vec::new();
+        let mut reader = self.reader.borrow_mut();
         loop {
             let mut line = String::new();
-            match self.reader.read_line(&mut line) {
+            match reader.read_line(&mut line) {
                 Ok(0) => break,
                 Ok(_) => {
                     if line.trim().is_empty() {
@@ -704,3 +709,9 @@ document.addEventListener('keyup', (e) => {
     }));
 });
 "#;
+
+static NEXT_BRIDGE_ID: AtomicU64 = AtomicU64::new(1);
+
+pub fn next_bridge_id() -> u64 {
+    NEXT_BRIDGE_ID.fetch_add(1, Ordering::Relaxed)
+}
