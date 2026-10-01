@@ -693,79 +693,142 @@ jobs:
 
   release:
     name: 🚀 Publish GitHub Release
-    needs: [package]
+    needs: [package, android-turnkey, ios]
     if: ${{ github.event_name == 'push' && startsWith(github.event.head_commit.message, 'release:') }}
     runs-on: ubuntu-latest
     permissions:
       contents: write
     env:
-      RELEASE_TAG: v0.2.0
+      RELEASE_TAG: v0.3.0
 
     steps:
-      - name: Download all-platform package
+      - name: Download all-platform addon
         uses: actions/download-artifact@v4
         with:
           name: godot_wry
           path: release/godot_wry
 
-      - name: Download Android package
+      - name: Download Android Standard turnkey package
         uses: actions/download-artifact@v4
         with:
-          name: godot_wry-android
-          path: release/godot_wry-android
+          name: godot_wry-android-godot4.7-standard
+          path: release/godot_wry-android-godot4.7-standard
 
-      - name: Download iOS package
+      - name: Download Android Mono turnkey package
         uses: actions/download-artifact@v4
         with:
-          name: godot_wry-ios
-          path: release/godot_wry-ios
+          name: godot_wry-android-godot4.7-mono
+          path: release/godot_wry-android-godot4.7-mono
 
-      - name: Create release ZIP files
+      - name: Download iOS turnkey package
+        uses: actions/download-artifact@v4
+        with:
+          name: godot_wry-ios-godot4.7
+          path: release/godot_wry-ios-godot4.7
+
+      - name: Create release ZIP files and checksums
         run: |
           (cd release/godot_wry && zip -qr ../godot_wry.zip .)
-          (cd release/godot_wry-android && zip -qr ../godot_wry-android.zip .)
-          (cd release/godot_wry-ios && zip -qr ../godot_wry-ios.zip .)
+          (cd release/godot_wry-android-godot4.7-standard && zip -qr ../godot_wry-android-godot4.7-standard.zip .)
+          (cd release/godot_wry-android-godot4.7-mono && zip -qr ../godot_wry-android-godot4.7-mono.zip .)
+          (cd release/godot_wry-ios-godot4.7 && zip -qr ../godot_wry-ios-godot4.7.zip .)
+          (
+            cd release
+            sha256sum \
+              godot_wry.zip \
+              godot_wry-android-godot4.7-standard.zip \
+              godot_wry-android-godot4.7-mono.zip \
+              godot_wry-ios-godot4.7.zip \
+              > SHA256SUMS
+          )
 
       - name: Publish release
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
           cat > release-notes.md <<'EOF'
-          ## Godot WRY 0.2.0
+          ## Godot WRY 0.3.0 — Turnkey mobile packages
 
-          This release upgrades the extension to **Godot 4.7** and adds support for running WebViews while the game is embedded in the Godot Editor's Game workspace.
+          This release makes Android and iOS distribution project-ready for **Godot 4.7**.
 
-          ### Highlights
-          - Godot 4.7 / godot-rust 0.5.5 (`api-4-7`)
-          - Windows/Linux embedded-game mode continues to use Godot's native child game window
-          - macOS 4.7 embedded-game mode uses an automatic editor-process WebView bridge compatible with Godot's CAContext/CALayer renderer
-          - WebView bounds, visibility, navigation, JavaScript evaluation, IPC, page-load events, focus, zoom and devtools are mirrored in embedded mode
-          - Existing Android and iOS support is retained
+          ### Download the package that matches your target
 
-          ### Included packages
-          - `godot_wry.zip`: all supported platforms
-          - `godot_wry-android.zip`: Android arm64-v8a + x86_64, including WRY Kotlin/Godot Gradle integration
-          - `godot_wry-ios.zip`: iOS arm64 device XCFramework
+          - `godot_wry.zip` — all-platform addon binaries.
+          - `godot_wry-android-godot4.7-standard.zip` — **turnkey Android package for Godot 4.7 Standard**.
+          - `godot_wry-android-godot4.7-mono.zip` — **turnkey Android package for Godot 4.7 Mono/.NET**.
+          - `godot_wry-ios-godot4.7.zip` — **turnkey iOS package**, including static device + simulator XCFramework.
+          - `SHA256SUMS` — release checksums.
 
-          ### Android
-          After extracting into an existing Godot project, install the Godot Android Build Template once, then run:
-          ```bash
-          python addons/godot_wry/android/install.py
-          ```
-          Export Android with Gradle Build enabled.
+          ### Android: no Build Template install and no WRY installer
 
-          ### iOS
-          Includes a device-arm64 XCFramework under `addons/godot_wry/bin/aarch64-apple-ios/`.
+          The Android turnkey ZIPs are rooted at the Godot project root and already contain:
 
-          ### Editor embedded game mode
-          No editor plugin needs to be enabled. On macOS, the extension automatically hosts WKWebView in the editor process when `Engine.is_embedded_in_editor()` is active.
+          - `addons/godot_wry`
+          - the matching official Godot 4.7 `android/build` Gradle template
+          - the matching official Godot debug/release AARs
+          - Gradle wrapper
+          - WRY Kotlin/JNI bridge
+          - WRY-compatible `GodotActivity`
+          - arm64-v8a and x86_64 `libgodot_wry.so`
+          - the correct `.build_version` marker
 
-          Built and validated by GitHub Actions on Linux, Windows, macOS, Android and iOS, including a real Godot 4.7 addon load smoke test.
+          Extract the ZIP into the project root and export with **Gradle Build** enabled.
+          You do **not** need to install Godot's Android Build Template separately and
+          you do **not** need to run `addons/godot_wry/android/install.py`.
+
+          Standard and Mono packages are separate so the bundled Godot runtime exactly
+          matches the editor/export-template edition.
+
+          ### iOS: static XCFramework, device + simulator
+
+          The iOS package contains a static `libgodot_wry.xcframework` with:
+
+          - iPhone/iPad device arm64
+          - Apple Silicon simulator arm64
+          - Intel simulator x86_64
+
+          Godot 4.7's Apple Embedded GDExtension exporter links the static XCFramework
+          directly and registers `gdext_rust_init`; no WRY-specific Xcode project edits,
+          framework copy step, or installer are required.
+
+          A normal Godot iOS export still requires Apple's Xcode and the official Godot
+          iOS export template, as any Godot iOS project does.
+
+          ### CI validation
+
+          Before publishing, CI verifies:
+
+          - Linux, Windows and macOS desktop builds
+          - Android arm64-v8a + x86_64 native builds
+          - Android **Standard turnkey ZIP → clean project → APK export**
+          - Android **Mono turnkey ZIP → clean project → APK export**
+          - iOS static XCFramework contains device and simulator slices
+          - Godot 4.7 **iOS project export** includes the XCFramework and GDExtension entry symbol
+          - Xcode builds the exported iOS project for the iOS Simulator
+          - Godot 4.7 GDExtension load smoke test
+
+          The Android/iOS turnkey packages retain desktop host binaries, so the same
+          project can be opened and tested in the desktop Godot editor before mobile export.
           EOF
 
-          if gh release view "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
-            gh release upload "$RELEASE_TAG"               release/godot_wry.zip               release/godot_wry-android.zip               release/godot_wry-ios.zip               --clobber               --repo "$GITHUB_REPOSITORY"
-          else
-            gh release create "$RELEASE_TAG"               release/godot_wry.zip               release/godot_wry-android.zip               release/godot_wry-ios.zip               --target "$GITHUB_SHA"               --title "Godot WRY v0.2.0 — Godot 4.7 & Editor Embedded WebView"               --notes-file release-notes.md               --repo "$GITHUB_REPOSITORY"
-          fi
+          files=(
+            release/godot_wry.zip
+            release/godot_wry-android-godot4.7-standard.zip
+            release/godot_wry-android-godot4.7-mono.zip
+            release/godot_wry-ios-godot4.7.zip
+            release/SHA256SUMS
+          )
 
+          if gh release view "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            gh release upload "$RELEASE_TAG" "${files[@]}" --clobber --repo "$GITHUB_REPOSITORY"
+            gh release edit "$RELEASE_TAG" \
+              --title "Godot WRY v0.3.0 — Turnkey Android & iOS" \
+              --notes-file release-notes.md \
+              --repo "$GITHUB_REPOSITORY"
+          else
+            gh release create "$RELEASE_TAG" "${files[@]}" \
+              --target "$GITHUB_SHA" \
+              --title "Godot WRY v0.3.0 — Turnkey Android & iOS" \
+              --notes-file release-notes.md \
+              --repo "$GITHUB_REPOSITORY"
+          fi
