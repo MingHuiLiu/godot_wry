@@ -15,8 +15,8 @@ import zipfile
 from pathlib import Path
 
 
-def copy_addon(repo: Path, output: Path) -> None:
-    source = repo / "godot" / "addons" / "godot_wry"
+def copy_addon(repo: Path, output: Path, addon_source: Path | None) -> None:
+    source = addon_source if addon_source is not None else repo / "godot" / "addons" / "godot_wry"
     target = output / "addons" / "godot_wry"
     if target.exists():
         shutil.rmtree(target)
@@ -82,6 +82,11 @@ def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--repo", type=Path, default=Path("."))
     parser.add_argument("--android-source", type=Path, required=True)
+    parser.add_argument(
+        "--addon-source",
+        type=Path,
+        help="Preassembled addon directory (used to retain desktop host binaries)",
+    )
     parser.add_argument("--template-id", required=True)
     parser.add_argument("--output", type=Path, required=True)
     args = parser.parse_args()
@@ -92,7 +97,8 @@ def main() -> int:
         shutil.rmtree(output)
     output.mkdir(parents=True)
 
-    copy_addon(repo, output)
+    addon_source = args.addon_source.resolve() if args.addon_source else None
+    copy_addon(repo, output, addon_source)
     extract_android_template(args.android_source.resolve(), output, args.template_id)
     install_wry(output)
     validate(output)
