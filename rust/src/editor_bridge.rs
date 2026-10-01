@@ -217,7 +217,13 @@ impl EditorBridgeClient {
     }
 
     pub fn poll(&self) -> io::Result<Vec<BridgeMessage>> {
-        let (messages, _eof) = self.reader.borrow_mut().read_messages()?;
+        let (messages, eof) = self.reader.borrow_mut().read_messages()?;
+        if eof {
+            return Err(io::Error::new(
+                io::ErrorKind::UnexpectedEof,
+                "Godot editor bridge closed the connection",
+            ));
+        }
         Ok(messages)
     }
 }
