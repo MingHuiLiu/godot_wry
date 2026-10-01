@@ -75,13 +75,14 @@ edition used by the project.
 The iOS turnkey ZIP can also be extracted directly into the project. It bundles
 both official Godot 4.7 **Standard** and **Mono/.NET** `ios.zip` export templates,
 so no additional Godot template download is required. Install the bundled
-template matching your editor once:
+templates once:
 
 ```sh
-python addons/godot_wry/ios/install.py --edition standard
-# or
-python addons/godot_wry/ios/install.py --edition mono
+python addons/godot_wry/ios/install.py
 ```
+
+By default this installs both Standard and Mono templates offline. To install
+only one edition, pass `--edition standard` or `--edition mono`.
 
 Godot 4.7 then links the included static XCFramework automatically. It contains
 arm64 device, arm64 simulator, and x86_64 simulator slices, so no WRY-specific
