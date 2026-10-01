@@ -506,8 +506,12 @@ impl HostedWebView {
                 .window_get_native_handle_ex(HandleType::WINDOW_HANDLE)
                 .window_id(new_window_id)
                 .done();
-            let ns_window = std::ptr::with_exposed_provenance_mut(native_window as usize);
-            if ns_window.is_null() || self.webview.reparent(ns_window).is_err() {
+            if native_window == 0
+                || self
+                    .webview
+                    .reparent(std::ptr::with_exposed_provenance_mut(native_window as usize))
+                    .is_err()
+            {
                 let _ = self.webview.set_visible(false);
                 return;
             }
