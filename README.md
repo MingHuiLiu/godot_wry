@@ -147,7 +147,7 @@ not needed with the turnkey Release ZIPs.
 
 ### iOS
 
-iOS uses a **static XCFramework**. The Release includes arm64 device plus
+iOS 14+ uses a **static XCFramework**. The Release includes arm64 device plus
 arm64/x86_64 simulator slices. The same Release ZIP also contains the official
 Godot 4.7 Standard and Mono iOS export templates for offline installation.
 Godot 4.7's Apple Embedded GDExtension exporter links the library and registers
