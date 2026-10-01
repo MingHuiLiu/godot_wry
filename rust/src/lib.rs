@@ -39,6 +39,8 @@ use godot::obj::Singleton;
 use lazy_static::lazy_static;
 use serde_json;
 use std::collections::HashMap;
+#[cfg(target_os = "macos")]
+use std::cell::Cell;
 use std::sync::{Arc, Mutex};
 use std::path::PathBuf;
 use wry::{WebViewBuilder, WebContext, Rect, WebViewAttributes, PageLoadEvent};
@@ -115,6 +117,8 @@ struct WebView {
     editor_bridge: Option<editor_bridge::EditorBridgeClient>,
     #[cfg(target_os = "macos")]
     editor_bridge_id: u64,
+    #[cfg(target_os = "macos")]
+    editor_devtools_open: Cell<bool>,
     #[export]
     full_window_size: bool,
     #[export]
@@ -166,6 +170,8 @@ impl IControl for WebView {
             editor_bridge: None,
             #[cfg(target_os = "macos")]
             editor_bridge_id: 0,
+            #[cfg(target_os = "macos")]
+            editor_devtools_open: Cell::new(false),
             full_window_size: true,
             url: "https://github.com/doceazedo/godot_wry".into(),
             html: "".into(),
@@ -219,6 +225,7 @@ impl IControl for WebView {
             });
             self.editor_bridge = None;
             self.editor_bridge_id = 0;
+            self.editor_devtools_open.set(false);
         }
     }
 
@@ -1045,6 +1052,8 @@ impl WebView {
                 Err(error) => {
                     godot_warn!("[Godot WRY] Editor bridge receive failed: {error}");
                     self.editor_bridge = None;
+                    self.editor_bridge_id = 0;
+                    self.editor_devtools_open.set(false);
                     return;
                 }
             },
@@ -1317,6 +1326,7 @@ impl WebView {
             self.send_editor_bridge(editor_bridge::BridgeMessage::CloseDevtools {
                 id: self.editor_bridge_id,
             });
+            self.editor_devtools_open.set(false);
             return;
         }
         if let Some(webview) = &self.webview {
@@ -1331,6 +1341,7 @@ impl WebView {
             self.send_editor_bridge(editor_bridge::BridgeMessage::OpenDevtools {
                 id: self.editor_bridge_id,
             });
+            self.editor_devtools_open.set(true);
             return;
         }
         if let Some(webview) = &self.webview {
@@ -1342,9 +1353,7 @@ impl WebView {
     fn is_devtools_open(&self) -> bool {
         #[cfg(target_os = "macos")]
         if self.using_editor_bridge() {
-            // WRY does not expose an async query over the bridge; devtools are
-            // controlled by this node, so report the configured state.
-            return self.devtools;
+            return self.editor_devtools_open.get();
         }
         if let Some(webview) = &self.webview {
             return webview.is_devtools_open();
