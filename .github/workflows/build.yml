@@ -256,6 +256,45 @@ jobs:
           grep -q 'addons/godot_wry/android/godot_wry.gradle' package/android/build/build.gradle
           rm -rf package/project.godot package/android
 
+      - name: Smoke-test addon with Godot 4.7 stable
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libgtk-3-dev libsoup-3.0-dev libwebkit2gtk-4.1-dev
+          curl -L --fail --retry 3 \
+            -o godot47.zip \
+            https://github.com/godotengine/godot/releases/download/4.7-stable/Godot_v4.7-stable_linux.x86_64.zip
+          echo "0b1a6c54c2c619c12e169fe9241edda4b81080b519451cec2984bf0d2c6cb73c  godot47.zip" | sha256sum -c -
+          unzip -q godot47.zip
+
+          mkdir -p smoke/addons
+          cp -R package/addons/godot_wry smoke/addons/
+          cat > smoke/project.godot <<'EOF'
+          [application]
+          config/name="Godot WRY 4.7 smoke"
+          run/main_scene="res://main.tscn"
+          EOF
+          cat > smoke/main.tscn <<'EOF'
+          [gd_scene load_steps=2 format=3]
+
+          [ext_resource path="res://smoke.gd" type="Script" id="1"]
+
+          [node name="Smoke" type="Node"]
+          script = ExtResource("1")
+          EOF
+          cat > smoke/smoke.gd <<'EOF'
+          extends Node
+
+          func _ready():
+              var webview = WebView.new()
+              add_child(webview)
+              print("GODOT_WRY_47_SMOKE_OK")
+              get_tree().quit()
+          EOF
+
+          ./Godot_v4.7-stable_linux.x86_64 --headless --editor --path smoke --quit
+          ./Godot_v4.7-stable_linux.x86_64 --headless --path smoke 2>&1 | tee godot47-smoke.log
+          grep -q "GODOT_WRY_47_SMOKE_OK" godot47-smoke.log
+
       - name: Create platform packages
         run: |
           cp -R package package-android
@@ -294,7 +333,7 @@ jobs:
     permissions:
       contents: write
     env:
-      RELEASE_TAG: v0.1.0-mobile.1
+      RELEASE_TAG: v0.2.0
 
     steps:
       - name: Download all-platform package
@@ -326,9 +365,16 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           cat > release-notes.md <<'EOF'
-          ## Godot WRY mobile support
+          ## Godot WRY 0.2.0
 
-          This release adds Android and iOS support to the Godot WRY addon.
+          This release upgrades the extension to **Godot 4.7** and adds support for running WebViews while the game is embedded in the Godot Editor's Game workspace.
+
+          ### Highlights
+          - Godot 4.7 / godot-rust 0.5.5 (`api-4-7`)
+          - Windows/Linux embedded-game mode continues to use Godot's native child game window
+          - macOS 4.7 embedded-game mode uses an automatic editor-process WebView bridge compatible with Godot's CAContext/CALayer renderer
+          - WebView bounds, visibility, navigation, JavaScript evaluation, IPC, page-load events, focus, zoom and devtools are mirrored in embedded mode
+          - Existing Android and iOS support is retained
 
           ### Included packages
           - `godot_wry.zip`: all supported platforms
@@ -345,12 +391,15 @@ jobs:
           ### iOS
           Includes a device-arm64 XCFramework under `addons/godot_wry/bin/aarch64-apple-ios/`.
 
-          Built and validated by GitHub Actions on Linux, Windows, macOS, Android and iOS.
+          ### Editor embedded game mode
+          No editor plugin needs to be enabled. On macOS, the extension automatically hosts WKWebView in the editor process when `Engine.is_embedded_in_editor()` is active.
+
+          Built and validated by GitHub Actions on Linux, Windows, macOS, Android and iOS, including a real Godot 4.7 addon load smoke test.
           EOF
 
           if gh release view "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
             gh release upload "$RELEASE_TAG"               release/godot_wry.zip               release/godot_wry-android.zip               release/godot_wry-ios.zip               --clobber               --repo "$GITHUB_REPOSITORY"
           else
-            gh release create "$RELEASE_TAG"               release/godot_wry.zip               release/godot_wry-android.zip               release/godot_wry-ios.zip               --target "$GITHUB_SHA"               --title "Godot WRY v0.1.0 Mobile Support"               --notes-file release-notes.md               --repo "$GITHUB_REPOSITORY"
+            gh release create "$RELEASE_TAG"               release/godot_wry.zip               release/godot_wry-android.zip               release/godot_wry-ios.zip               --target "$GITHUB_SHA"               --title "Godot WRY v0.2.0 — Godot 4.7 & Editor Embedded WebView"               --notes-file release-notes.md               --repo "$GITHUB_REPOSITORY"
           fi
 
