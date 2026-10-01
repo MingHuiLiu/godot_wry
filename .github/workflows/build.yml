@@ -285,3 +285,72 @@ jobs:
           name: godot_wry-ios
           path: package-ios
           if-no-files-found: error
+
+  release:
+    name: 🚀 Publish GitHub Release
+    needs: [package]
+    if: ${{ github.event_name == 'push' && startsWith(github.event.head_commit.message, 'release:') }}
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    env:
+      RELEASE_TAG: v0.1.0-mobile.1
+
+    steps:
+      - name: Download all-platform package
+        uses: actions/download-artifact@v4
+        with:
+          name: godot_wry
+          path: release/godot_wry
+
+      - name: Download Android package
+        uses: actions/download-artifact@v4
+        with:
+          name: godot_wry-android
+          path: release/godot_wry-android
+
+      - name: Download iOS package
+        uses: actions/download-artifact@v4
+        with:
+          name: godot_wry-ios
+          path: release/godot_wry-ios
+
+      - name: Create release ZIP files
+        run: |
+          (cd release/godot_wry && zip -qr ../godot_wry.zip .)
+          (cd release/godot_wry-android && zip -qr ../godot_wry-android.zip .)
+          (cd release/godot_wry-ios && zip -qr ../godot_wry-ios.zip .)
+
+      - name: Publish release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          cat > release-notes.md <<'EOF'
+          ## Godot WRY mobile support
+
+          This release adds Android and iOS support to the Godot WRY addon.
+
+          ### Included packages
+          - `godot_wry.zip`: all supported platforms
+          - `godot_wry-android.zip`: Android arm64-v8a + x86_64, including WRY Kotlin/Godot Gradle integration
+          - `godot_wry-ios.zip`: iOS arm64 device XCFramework
+
+          ### Android
+          After extracting into an existing Godot project, install the Godot Android Build Template once, then run:
+          ```bash
+          python addons/godot_wry/android/install.py
+          ```
+          Export Android with Gradle Build enabled.
+
+          ### iOS
+          Includes a device-arm64 XCFramework under `addons/godot_wry/bin/aarch64-apple-ios/`.
+
+          Built and validated by GitHub Actions on Linux, Windows, macOS, Android and iOS.
+          EOF
+
+          if gh release view "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            gh release upload "$RELEASE_TAG"               release/godot_wry.zip               release/godot_wry-android.zip               release/godot_wry-ios.zip               --clobber               --repo "$GITHUB_REPOSITORY"
+          else
+            gh release create "$RELEASE_TAG"               release/godot_wry.zip               release/godot_wry-android.zip               release/godot_wry-ios.zip               --target "$GITHUB_SHA"               --title "Godot WRY v0.1.0 Mobile Support"               --notes-file release-notes.md               --repo "$GITHUB_REPOSITORY"
+          fi
+
