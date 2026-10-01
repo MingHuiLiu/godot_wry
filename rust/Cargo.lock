@@ -720,7 +720,6 @@ dependencies = [
  "ndk",
  "ndk-context",
  "ndk-sys",
- "objc2-app-kit",
  "raw-window-handle",
  "serde",
  "serde_json",
