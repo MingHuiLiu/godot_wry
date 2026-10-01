@@ -1,0 +1,44 @@
+// godot_wry Android integration.
+//
+// Applied from the Godot Android custom build template's build.gradle.
+// It adds WRY's generated Kotlin bridge sources, the AndroidX WebKit
+// dependency they use, and makes Godot launch the WRY-compatible GodotActivity.
+
+dependencies {
+    implementation "androidx.webkit:webkit:1.10.0"
+}
+
+def godotWryAddonDir = file("../../addons/godot_wry")
+def godotWryKotlinDir = new File(godotWryAddonDir, "android/kotlin")
+android.sourceSets.main.java.srcDir godotWryKotlinDir
+
+def patchGodotWryManifest = { File manifest ->
+    if (!manifest.exists()) {
+        return
+    }
+
+    def original = manifest.getText("UTF-8")
+    def patched = original.replace(
+        "com.godot.game.GodotApp",
+        "com.example.godotwry.WryActivity"
+    )
+
+    if (patched != original) {
+        manifest.write(patched, "UTF-8")
+        logger.lifecycle("[godot_wry] Patched Android activity in " + manifest)
+    }
+}
+
+// Godot writes build-type manifest fragments during export. Patch both the
+// template manifest and those generated fragments immediately before Android's
+// manifest merge, so export settings still apply to the WRY activity.
+tasks.configureEach { task ->
+    if (task.name.startsWith("process") && task.name.endsWith("MainManifest")) {
+        task.doFirst {
+            patchGodotWryManifest(file("AndroidManifest.xml"))
+            ["debug", "dev", "release"].each { variant ->
+                patchGodotWryManifest(file("src/${variant}/AndroidManifest.xml"))
+            }
+        }
+    }
+}
