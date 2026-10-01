@@ -3,6 +3,9 @@ mod macros;
 mod godot_window;
 mod protocols;
 
+#[cfg(target_os = "macos")]
+mod editor_bridge;
+
 // Android integration — compiled only when targeting Android.
 #[cfg(target_os = "android")]
 mod android;
@@ -29,13 +32,15 @@ fn _wry_android_binding() {
 use godot::global::MouseButtonMask;
 use godot::init::*;
 use godot::prelude::*;
-use godot::classes::{Control, DisplayServer, IControl, InputEvent, InputEventMouseButton, InputEventMouseMotion, InputEventKey, ProjectSettings, Viewport};
+use godot::classes::{Control, DisplayServer, Engine, IControl, InputEvent, InputEventMouseButton, InputEventMouseMotion, InputEventKey, ProjectSettings, Viewport};
 use godot::global::{Key, MouseButton};
 // Singleton trait must be explicitly imported in gdext 0.5+ for ::singleton() calls.
 use godot::obj::Singleton;
 use lazy_static::lazy_static;
 use serde_json;
 use std::collections::HashMap;
+#[cfg(target_os = "macos")]
+use std::cell::Cell;
 use std::sync::{Arc, Mutex};
 use std::path::PathBuf;
 use wry::{WebViewBuilder, WebContext, Rect, WebViewAttributes, PageLoadEvent};
@@ -64,7 +69,28 @@ extern "system" {}
 struct GodotWRY;
 
 #[gdextension]
-unsafe impl ExtensionLibrary for GodotWRY {}
+unsafe impl ExtensionLibrary for GodotWRY {
+    fn on_stage_init(stage: InitStage) {
+        #[cfg(target_os = "macos")]
+        if stage == InitStage::MainLoop && Engine::singleton().is_editor_hint() {
+            editor_bridge::start_editor_server();
+        }
+    }
+
+    fn on_main_loop_frame() {
+        #[cfg(target_os = "macos")]
+        if Engine::singleton().is_editor_hint() {
+            editor_bridge::poll_editor_server();
+        }
+    }
+
+    fn on_stage_deinit(stage: InitStage) {
+        #[cfg(target_os = "macos")]
+        if stage == InitStage::MainLoop && Engine::singleton().is_editor_hint() {
+            editor_bridge::stop_editor_server();
+        }
+    }
+}
 
 #[derive(GodotClass)]
 #[class(base=Control)]
@@ -87,6 +113,12 @@ struct WebView {
     previous_content_scale_factor: f32,
     #[cfg(target_os = "android")]
     android_init_deferred: bool,
+    #[cfg(target_os = "macos")]
+    editor_bridge: Option<editor_bridge::EditorBridgeClient>,
+    #[cfg(target_os = "macos")]
+    editor_bridge_id: u64,
+    #[cfg(target_os = "macos")]
+    editor_devtools_open: Cell<bool>,
     #[export]
     full_window_size: bool,
     #[export]
@@ -134,6 +166,12 @@ impl IControl for WebView {
             previous_content_scale_factor: 1.0,
             #[cfg(target_os = "android")]
             android_init_deferred: false,
+            #[cfg(target_os = "macos")]
+            editor_bridge: None,
+            #[cfg(target_os = "macos")]
+            editor_bridge_id: 0,
+            #[cfg(target_os = "macos")]
+            editor_devtools_open: Cell::new(false),
             full_window_size: true,
             url: "https://github.com/doceazedo/godot_wry".into(),
             html: "".into(),
@@ -179,6 +217,18 @@ impl IControl for WebView {
         }
     }
 
+    fn exit_tree(&mut self) {
+        #[cfg(target_os = "macos")]
+        if self.editor_bridge.is_some() {
+            self.send_editor_bridge(editor_bridge::BridgeMessage::Destroy {
+                id: self.editor_bridge_id,
+            });
+            self.editor_bridge = None;
+            self.editor_bridge_id = 0;
+            self.editor_devtools_open.set(false);
+        }
+    }
+
     fn process(&mut self, _delta: f64) {
         if let Ok(mut pos) = self.cached_global_position.lock() {
             *pos = self.base().get_global_position();
@@ -199,7 +249,7 @@ impl IControl for WebView {
     }
 
     fn input(&mut self, event: Gd<InputEvent>) {
-        if self.webview.is_none() || self.full_window_size {
+        if !self.has_webview_backend() || self.full_window_size {
             return;
         }
 
@@ -209,9 +259,7 @@ impl IControl for WebView {
                 let rect = self.base().get_global_rect();
 
                 if !rect.contains_point(mouse_pos) {
-                    if let Some(webview) = &self.webview {
-                        let _ = webview.focus_parent();
-                    }
+                    self.focus_parent();
                 }
             }
         }
@@ -231,6 +279,32 @@ impl WebView {
 
     #[func]
     fn update_webview(&mut self) {
+        #[cfg(target_os = "macos")]
+        if self.using_editor_bridge() {
+            self.poll_editor_bridge();
+            if self.editor_bridge.is_none() {
+                self.build_editor_bridge();
+                if self.editor_bridge.is_none() {
+                    return;
+                }
+            }
+
+            let viewport_size = self.current_viewport_size();
+            let content_scale_factor = self.base().get_window()
+                .map(|w| w.get_content_scale_factor())
+                .unwrap_or(1.0);
+            let needs_resize = self.base().get_global_position() != self.previous_global_position
+                || viewport_size != self.previous_viewport_size
+                || content_scale_factor != self.previous_content_scale_factor;
+            if needs_resize {
+                self.previous_global_position = self.base().get_global_position();
+                self.previous_viewport_size = viewport_size;
+                self.previous_content_scale_factor = content_scale_factor;
+                self.resize();
+            }
+            return;
+        }
+
         if self.webview.is_none() {
             return;
         }
@@ -238,7 +312,7 @@ impl WebView {
         let viewport_size = self.base().get_window()
             .map(|w| w.get_size())
             .unwrap_or_else(|| {
-                self.base().get_tree().get_root().expect("Could not get root viewport").get_size()
+                self.base().get_tree().get_root().get_size()
             });
         let window_position = DisplayServer::singleton().window_get_position_ex().window_id(self.window_id).done();
         let content_scale_factor = self.base().get_window()
@@ -268,6 +342,12 @@ impl WebView {
         let display_server = DisplayServer::singleton();
         if display_server.get_name() == GString::from("headless") {
             godot_warn!("Godot WRY: Headless mode detected. webview will not be created.");
+            return;
+        }
+
+        #[cfg(target_os = "macos")]
+        if self.using_editor_bridge() {
+            self.build_editor_bridge();
             return;
         }
 
@@ -843,17 +923,184 @@ impl WebView {
     fn create_webview(&mut self) {
         godot_print!("[Godot WRY] create_webview called!");
         self.build_webview();
-        if self.webview.is_none() {
-            godot_print!("[Godot WRY] create_webview failed: webview is none!");
+        if !self.has_webview_backend() {
+            godot_print!("[Godot WRY] create_webview failed: no webview backend!");
             return;
         }
         godot_print!("[Godot WRY] create_webview succeeded!");
 
-        let mut viewport = self.base().get_tree().get_root().expect("Could not get root viewport");
+        let mut viewport = self.base().get_tree().get_root();
         viewport.connect("size_changed", &Callable::from_object_method(&*self.base(), "resize"));
 
         self.base().clone().connect("resized", &Callable::from_object_method(&*self.base(), "resize"));
         self.base().clone().connect("visibility_changed", &Callable::from_object_method(&*self.base(), "update_visibility"));
+    }
+
+    fn has_webview_backend(&self) -> bool {
+        if self.webview.is_some() {
+            return true;
+        }
+        #[cfg(target_os = "macos")]
+        {
+            return self.editor_bridge.is_some();
+        }
+        #[allow(unreachable_code)]
+        false
+    }
+
+    fn current_viewport_size(&self) -> Vector2i {
+        self.base().get_window()
+            .map(|w| w.get_size())
+            .unwrap_or_else(|| {
+                self.base().get_tree().get_root()
+                    .get_size()
+            })
+    }
+
+    #[cfg(target_os = "macos")]
+    fn using_editor_bridge(&self) -> bool {
+        Engine::singleton().is_embedded_in_editor()
+            && DisplayServer::singleton().get_name() == GString::from("embedded")
+    }
+
+    #[cfg(target_os = "macos")]
+    fn bridge_config(&self) -> editor_bridge::BridgeConfig {
+        editor_bridge::BridgeConfig {
+            url: String::from(&self.url),
+            html: String::from(&self.html),
+            data_directory: String::from(&self.data_directory),
+            transparent: self.transparent,
+            devtools: self.devtools,
+            user_agent: String::from(&self.user_agent),
+            zoom_hotkeys: self.zoom_hotkeys,
+            clipboard: self.clipboard,
+            incognito: self.incognito,
+            focused: self.focused_when_created,
+            autoplay: self.autoplay,
+            forward_input_events: self.forward_input_events,
+        }
+    }
+
+    #[cfg(target_os = "macos")]
+    fn bridge_bounds(&self) -> editor_bridge::BridgeBounds {
+        let fallback = self.current_viewport_size();
+        let logical_viewport = self.base().get_viewport()
+            .map(|viewport| viewport.get_visible_rect().size)
+            .unwrap_or(Vector2::new(fallback.x as f32, fallback.y as f32));
+        let viewport_width = logical_viewport.x.round().max(1.0) as i32;
+        let viewport_height = logical_viewport.y.round().max(1.0) as i32;
+        let (x, y, width, height) = if self.full_window_size {
+            (0.0, 0.0, viewport_width as f32, viewport_height as f32)
+        } else {
+            let position = self.base().get_global_position();
+            let size = self.base().get_size();
+            (position.x, position.y, size.x, size.y)
+        };
+        editor_bridge::BridgeBounds {
+            viewport_width,
+            viewport_height,
+            x,
+            y,
+            width,
+            height,
+            full_window: self.full_window_size,
+            visible: self.base().is_visible_in_tree(),
+        }
+    }
+
+    #[cfg(target_os = "macos")]
+    fn build_editor_bridge(&mut self) {
+        if self.editor_bridge.is_some() {
+            return;
+        }
+        match editor_bridge::EditorBridgeClient::connect() {
+            Ok(client) => {
+                let id = editor_bridge::next_bridge_id();
+                let message = editor_bridge::BridgeMessage::Create {
+                    id,
+                    config: self.bridge_config(),
+                    bounds: self.bridge_bounds(),
+                };
+                if let Err(error) = client.send(&message) {
+                    godot_warn!("[Godot WRY] Could not create editor-hosted WebView: {error}");
+                    return;
+                }
+                self.editor_bridge_id = id;
+                self.editor_bridge = Some(client);
+                godot_print!("[Godot WRY] Using Godot 4.7 macOS editor-embedded WebView bridge");
+            }
+            Err(error) => {
+                godot_warn!("[Godot WRY] Editor bridge is not ready yet: {error}");
+            }
+        }
+    }
+
+    #[cfg(target_os = "macos")]
+    fn send_editor_bridge(&self, message: editor_bridge::BridgeMessage) {
+        if let Some(client) = &self.editor_bridge {
+            if let Err(error) = client.send(&message) {
+                godot_warn!("[Godot WRY] Editor bridge send failed: {error}");
+            }
+        }
+    }
+
+    #[cfg(target_os = "macos")]
+    fn poll_editor_bridge(&mut self) {
+        let messages = match self.editor_bridge.as_ref() {
+            Some(client) => match client.poll() {
+                Ok(messages) => messages,
+                Err(error) => {
+                    godot_warn!("[Godot WRY] Editor bridge receive failed: {error}");
+                    self.editor_bridge = None;
+                    self.editor_bridge_id = 0;
+                    self.editor_devtools_open.set(false);
+                    return;
+                }
+            },
+            None => return,
+        };
+
+        for message in messages {
+            match message {
+                editor_bridge::BridgeMessage::Event { id, event, payload }
+                    if id == self.editor_bridge_id =>
+                {
+                    match event.as_str() {
+                        "ipc" => {
+                            if !dispatch_bridge_ipc(
+                                &mut self.base().clone(),
+                                &self.cached_global_position,
+                                &payload,
+                            ) {
+                                self.base().clone().call_deferred(
+                                    "emit_signal",
+                                    &["ipc_message".to_variant(), payload.to_variant()],
+                                );
+                            }
+                        }
+                        "page_load_started" => {
+                            self.base().clone().call_deferred(
+                                "emit_signal",
+                                &["page_load_started".to_variant(), payload.to_variant()],
+                            );
+                        }
+                        "page_load_finished" => {
+                            self.base().clone().call_deferred(
+                                "emit_signal",
+                                &["page_load_finished".to_variant(), payload.to_variant()],
+                            );
+                        }
+                        _ => {}
+                    }
+                }
+                editor_bridge::BridgeMessage::Error { id, message }
+                    if id == 0 || id == self.editor_bridge_id =>
+                {
+                    godot_error!("[Godot WRY] Editor bridge error: {message}");
+                }
+                _ => {}
+            }
+        }
     }
 
     fn reparent_webview(&mut self, _new_window_id: i32) {
@@ -888,21 +1135,37 @@ impl WebView {
 
     #[func]
     fn post_message(&self, message: GString) {
+        let data = serde_json::json!({ "detail": String::from(message) });
+        let script = format!("document.dispatchEvent(new CustomEvent('message', {}))", data);
+        #[cfg(target_os = "macos")]
+        if self.using_editor_bridge() {
+            self.send_editor_bridge(editor_bridge::BridgeMessage::Eval {
+                id: self.editor_bridge_id,
+                script,
+            });
+            return;
+        }
         if let Some(webview) = &self.webview {
-            let data = serde_json::json!({ "detail": String::from(message) });
-            let script = format!("document.dispatchEvent(new CustomEvent('message', {}))", data);
             let _ = webview.evaluate_script(&script);
         }
     }
 
     #[func]
     fn resize(&self) {
+        #[cfg(target_os = "macos")]
+        if self.using_editor_bridge() {
+            self.send_editor_bridge(editor_bridge::BridgeMessage::Bounds {
+                id: self.editor_bridge_id,
+                bounds: self.bridge_bounds(),
+            });
+            return;
+        }
         if let Some(webview) = &self.webview {
             let rect = if self.full_window_size {
                 let window_size = self.base().get_window()
                     .map(|w| w.get_size())
                     .unwrap_or_else(|| {
-                        self.base().get_tree().get_root().expect("Could not get root viewport").get_size()
+                        self.base().get_tree().get_root().get_size()
                     });
                 Rect {
                     position: PhysicalPosition::new(0, 0).into(),
@@ -941,6 +1204,14 @@ impl WebView {
 
     #[func]
     fn eval(&self, script: GString) {
+        #[cfg(target_os = "macos")]
+        if self.using_editor_bridge() {
+            self.send_editor_bridge(editor_bridge::BridgeMessage::Eval {
+                id: self.editor_bridge_id,
+                script: String::from(script),
+            });
+            return;
+        }
         if let Some(webview) = &self.webview {
             let _ = webview.evaluate_script(&*String::from(script));
         }
@@ -948,6 +1219,15 @@ impl WebView {
 
     #[func]
     fn update_visibility(&self) {
+        #[cfg(target_os = "macos")]
+        if self.using_editor_bridge() {
+            self.send_editor_bridge(editor_bridge::BridgeMessage::SetVisible {
+                id: self.editor_bridge_id,
+                visible: self.base().is_visible_in_tree(),
+            });
+            self.resize();
+            return;
+        }
         if let Some(webview) = &self.webview {
             let visibility = self.base().is_visible_in_tree();
             match webview.set_visible(visibility) {
@@ -966,6 +1246,14 @@ impl WebView {
 
     #[func]
     fn set_visible(&self, visibility: bool) {
+        #[cfg(target_os = "macos")]
+        if self.using_editor_bridge() {
+            self.send_editor_bridge(editor_bridge::BridgeMessage::SetVisible {
+                id: self.editor_bridge_id,
+                visible: visibility,
+            });
+            return;
+        }
         if let Some(webview) = &self.webview {
             let _ = webview.set_visible(visibility);
         }
@@ -973,6 +1261,14 @@ impl WebView {
 
     #[func]
     fn load_html(&self, html: GString) {
+        #[cfg(target_os = "macos")]
+        if self.using_editor_bridge() {
+            self.send_editor_bridge(editor_bridge::BridgeMessage::LoadHtml {
+                id: self.editor_bridge_id,
+                html: String::from(html),
+            });
+            return;
+        }
         if let Some(webview) = &self.webview {
             let _ = webview.load_html(&*String::from(html));
         }
@@ -996,6 +1292,14 @@ impl WebView {
             }
         }
 
+        #[cfg(target_os = "macos")]
+        if self.using_editor_bridge() {
+            self.send_editor_bridge(editor_bridge::BridgeMessage::LoadUrl {
+                id: self.editor_bridge_id,
+                url: url_str,
+            });
+            return;
+        }
         if let Some(webview) = &self.webview {
             let _ = webview.load_url(&url_str);
         }
@@ -1003,6 +1307,13 @@ impl WebView {
 
     #[func]
     fn clear_all_browsing_data(&self) {
+        #[cfg(target_os = "macos")]
+        if self.using_editor_bridge() {
+            self.send_editor_bridge(editor_bridge::BridgeMessage::ClearBrowsingData {
+                id: self.editor_bridge_id,
+            });
+            return;
+        }
         if let Some(webview) = &self.webview {
             let _ = webview.clear_all_browsing_data();
         }
@@ -1010,6 +1321,14 @@ impl WebView {
 
     #[func]
     fn close_devtools(&self) {
+        #[cfg(target_os = "macos")]
+        if self.using_editor_bridge() {
+            self.send_editor_bridge(editor_bridge::BridgeMessage::CloseDevtools {
+                id: self.editor_bridge_id,
+            });
+            self.editor_devtools_open.set(false);
+            return;
+        }
         if let Some(webview) = &self.webview {
             let _ = webview.close_devtools();
         }
@@ -1017,6 +1336,14 @@ impl WebView {
 
     #[func]
     fn open_devtools(&self) {
+        #[cfg(target_os = "macos")]
+        if self.using_editor_bridge() {
+            self.send_editor_bridge(editor_bridge::BridgeMessage::OpenDevtools {
+                id: self.editor_bridge_id,
+            });
+            self.editor_devtools_open.set(true);
+            return;
+        }
         if let Some(webview) = &self.webview {
             let _ = webview.open_devtools();
         }
@@ -1024,6 +1351,10 @@ impl WebView {
 
     #[func]
     fn is_devtools_open(&self) -> bool {
+        #[cfg(target_os = "macos")]
+        if self.using_editor_bridge() {
+            return self.editor_devtools_open.get();
+        }
         if let Some(webview) = &self.webview {
             return webview.is_devtools_open();
         }
@@ -1032,6 +1363,13 @@ impl WebView {
 
     #[func]
     fn focus(&self) {
+        #[cfg(target_os = "macos")]
+        if self.using_editor_bridge() {
+            self.send_editor_bridge(editor_bridge::BridgeMessage::Focus {
+                id: self.editor_bridge_id,
+            });
+            return;
+        }
         if let Some(webview) = &self.webview {
             let _ = webview.focus();
         }
@@ -1039,6 +1377,13 @@ impl WebView {
 
     #[func]
     fn focus_parent(&self) {
+        #[cfg(target_os = "macos")]
+        if self.using_editor_bridge() {
+            self.send_editor_bridge(editor_bridge::BridgeMessage::FocusParent {
+                id: self.editor_bridge_id,
+            });
+            return;
+        }
         if let Some(webview) = &self.webview {
             let _ = webview.focus_parent();
         }
@@ -1046,6 +1391,13 @@ impl WebView {
 
     #[func]
     fn print(&self) {
+        #[cfg(target_os = "macos")]
+        if self.using_editor_bridge() {
+            self.send_editor_bridge(editor_bridge::BridgeMessage::Print {
+                id: self.editor_bridge_id,
+            });
+            return;
+        }
         if let Some(webview) = &self.webview {
             let _ = webview.print();
         }
@@ -1053,6 +1405,13 @@ impl WebView {
 
     #[func]
     fn reload(&self) {
+        #[cfg(target_os = "macos")]
+        if self.using_editor_bridge() {
+            self.send_editor_bridge(editor_bridge::BridgeMessage::Reload {
+                id: self.editor_bridge_id,
+            });
+            return;
+        }
         if let Some(webview) = &self.webview {
             let _ = webview.reload();
         }
@@ -1060,9 +1419,135 @@ impl WebView {
 
     #[func]
     fn zoom(&self, scale_factor: f64) {
+        #[cfg(target_os = "macos")]
+        if self.using_editor_bridge() {
+            self.send_editor_bridge(editor_bridge::BridgeMessage::Zoom {
+                id: self.editor_bridge_id,
+                scale: scale_factor,
+            });
+            return;
+        }
         if let Some(webview) = &self.webview {
             let _ = webview.zoom(scale_factor);
         }
+    }
+}
+
+
+fn dispatch_bridge_ipc(
+    base: &mut Gd<Control>,
+    cached_position: &Arc<Mutex<Vector2>>,
+    body: &str,
+) -> bool {
+    let Ok(json_value) = serde_json::from_str::<serde_json::Value>(body) else {
+        return false;
+    };
+    let Some(event_type) = json_value.get("type").and_then(|value| value.as_str()) else {
+        return false;
+    };
+    let global_pos = cached_position.lock().map(|p| *p).unwrap_or_default();
+    let x = json_value.get("x").and_then(|v| v.as_f64()).unwrap_or(0.0) as f32;
+    let y = json_value.get("y").and_then(|v| v.as_f64()).unwrap_or(0.0) as f32;
+    let position = Vector2::new(global_pos.x + x, global_pos.y + y);
+
+    match event_type {
+        "_mouse_move" => {
+            let mut event = InputEventMouseMotion::new_gd();
+            event.set_position(position);
+            event.set_global_position(position);
+            event.set_relative(Vector2::new(
+                json_value.get("movementX").and_then(|v| v.as_f64()).unwrap_or(0.0) as f32,
+                json_value.get("movementY").and_then(|v| v.as_f64()).unwrap_or(0.0) as f32,
+            ));
+            event.set_button_mask(*CURRENT_BUTTON_MASK.lock().unwrap());
+            if let Some(mut viewport) = base.get_viewport() {
+                viewport.call_deferred("push_input", &[event.to_variant()]);
+            }
+            true
+        }
+        "_mouse_down" | "_mouse_up" => {
+            let godot_button = match json_value.get("button").and_then(|v| v.as_i64()).unwrap_or(0) {
+                0 => MouseButton::LEFT,
+                1 => MouseButton::MIDDLE,
+                2 => MouseButton::RIGHT,
+                3 => MouseButton::WHEEL_UP,
+                4 => MouseButton::WHEEL_DOWN,
+                _ => MouseButton::LEFT,
+            };
+            let pressed = event_type == "_mouse_down";
+            if matches!(godot_button, MouseButton::LEFT | MouseButton::RIGHT | MouseButton::MIDDLE) {
+                let mask = match godot_button {
+                    MouseButton::LEFT => MouseButtonMask::LEFT,
+                    MouseButton::RIGHT => MouseButtonMask::RIGHT,
+                    MouseButton::MIDDLE => MouseButtonMask::MIDDLE,
+                    _ => MouseButtonMask::default(),
+                };
+                let mut current = CURRENT_BUTTON_MASK.lock().unwrap();
+                if pressed {
+                    *current = *current | mask;
+                } else {
+                    *current = MouseButtonMask::from_ord(current.ord() & !mask.ord());
+                }
+            }
+            let mut event = InputEventMouseButton::new_gd();
+            event.set_button_index(godot_button);
+            event.set_position(position);
+            event.set_global_position(position);
+            event.set_pressed(pressed);
+            event.set_button_mask(*CURRENT_BUTTON_MASK.lock().unwrap());
+            if let Some(mut viewport) = base.get_viewport() {
+                viewport.call_deferred("push_input", &[event.to_variant()]);
+            }
+            true
+        }
+        "_mouse_wheel" => {
+            let delta_x = json_value.get("deltaX").and_then(|v| v.as_f64()).unwrap_or(0.0) as f32;
+            let delta_y = json_value.get("deltaY").and_then(|v| v.as_f64()).unwrap_or(0.0) as f32;
+            let button_mask = *CURRENT_BUTTON_MASK.lock().unwrap();
+            let modifiers = (
+                json_value.get("shift").and_then(|v| v.as_bool()).unwrap_or(false),
+                json_value.get("ctrl").and_then(|v| v.as_bool()).unwrap_or(false),
+                json_value.get("alt").and_then(|v| v.as_bool()).unwrap_or(false),
+                json_value.get("meta").and_then(|v| v.as_bool()).unwrap_or(false),
+            );
+            let viewport = base.get_viewport();
+            if delta_y != 0.0 {
+                send_wheel_event(
+                    if delta_y < 0.0 { MouseButton::WHEEL_UP } else { MouseButton::WHEEL_DOWN },
+                    position,
+                    (delta_y.abs() / 100.0).max(1.0),
+                    button_mask,
+                    modifiers,
+                    &viewport,
+                );
+            }
+            if delta_x != 0.0 {
+                send_wheel_event(
+                    if delta_x < 0.0 { MouseButton::WHEEL_LEFT } else { MouseButton::WHEEL_RIGHT },
+                    position,
+                    (delta_x.abs() / 100.0).max(1.0),
+                    button_mask,
+                    modifiers,
+                    &viewport,
+                );
+            }
+            true
+        }
+        "_key_down" | "_key_up" => {
+            let key = json_value.get("key").and_then(|v| v.as_str()).unwrap_or("");
+            let mut event = InputEventKey::new_gd();
+            event.set_keycode(GODOT_KEYS.get(key).copied().unwrap_or(Key::NONE));
+            event.set_pressed(event_type == "_key_down");
+            event.set_shift_pressed(json_value.get("shift").and_then(|v| v.as_bool()).unwrap_or(false));
+            event.set_ctrl_pressed(json_value.get("ctrl").and_then(|v| v.as_bool()).unwrap_or(false));
+            event.set_alt_pressed(json_value.get("alt").and_then(|v| v.as_bool()).unwrap_or(false));
+            event.set_meta_pressed(json_value.get("meta").and_then(|v| v.as_bool()).unwrap_or(false));
+            if let Some(mut viewport) = base.get_viewport() {
+                viewport.call_deferred("push_input", &[event.to_variant()]);
+            }
+            true
+        }
+        _ => false,
     }
 }
 
