@@ -6,14 +6,14 @@ The GitHub iOS turnkey Release package bundles both official Godot 4.7
 - Standard
 - Mono/.NET
 
-After extracting the package into a Godot project, install the bundled template
-matching your editor once (no network download):
+After extracting the package into a Godot project, install both bundled
+templates once (no network download):
 
 ```bash
-python addons/godot_wry/ios/install.py --edition standard
-# or:
-python addons/godot_wry/ios/install.py --edition mono
+python addons/godot_wry/ios/install.py
 ```
+
+To install only one edition, use `--edition standard` or `--edition mono`.
 
 The WRY GDExtension itself is a static XCFramework containing:
 - iOS device arm64
