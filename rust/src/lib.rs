@@ -769,7 +769,7 @@ impl WebView {
             })
 .with_custom_protocol(
     "res".into(), move |_webview_id, request| {
-        std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| get_res_response(request)))
+        std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| crate::protocols::get_res_response(request)))
             .unwrap_or_else(|_| {
                 http::Response::builder()
                     .header("Content-Type", "text/plain")
@@ -1188,6 +1188,7 @@ lazy_static! {
 // ── WRY LIFECYCLE JNI BINDINGS ─────────────────────────────────────────
 // Expose the native hooks expected by your com.example.godotwry.WryActivity wrapper
 
+#[cfg(target_os = "android")]
 #[no_mangle]
 pub unsafe extern "C" fn Java_com_example_godotwry_WryActivity_create(
     _env: jni::JNIEnv,
@@ -1197,6 +1198,7 @@ pub unsafe extern "C" fn Java_com_example_godotwry_WryActivity_create(
     godot_print!("[Godot WRY JNI] Native lifecycle hook: create executed.");
 }
 
+#[cfg(target_os = "android")]
 #[no_mangle]
 pub unsafe extern "C" fn Java_com_example_godotwry_WryActivity_start(
     _env: jni::JNIEnv,
@@ -1205,6 +1207,7 @@ pub unsafe extern "C" fn Java_com_example_godotwry_WryActivity_start(
     godot_print!("[Godot WRY JNI] Native lifecycle hook: start executed.");
 }
 
+#[cfg(target_os = "android")]
 #[no_mangle]
 pub unsafe extern "C" fn Java_com_example_godotwry_WryActivity_resume(
     _env: jni::JNIEnv,
@@ -1213,6 +1216,7 @@ pub unsafe extern "C" fn Java_com_example_godotwry_WryActivity_resume(
     godot_print!("[Godot WRY JNI] Native lifecycle hook: resume executed.");
 }
 
+#[cfg(target_os = "android")]
 #[no_mangle]
 pub unsafe extern "C" fn Java_com_example_godotwry_WryActivity_focus(
     _env: jni::JNIEnv,
@@ -1222,6 +1226,7 @@ pub unsafe extern "C" fn Java_com_example_godotwry_WryActivity_focus(
     // Keeps window focus states synchronized across runtime contexts
 }
 
+#[cfg(target_os = "android")]
 #[no_mangle]
 pub unsafe extern "C" fn Java_com_example_godotwry_WryActivity_pause(
     _env: jni::JNIEnv,
@@ -1230,6 +1235,7 @@ pub unsafe extern "C" fn Java_com_example_godotwry_WryActivity_pause(
     godot_print!("[Godot WRY JNI] Native lifecycle hook: pause executed.");
 }
 
+#[cfg(target_os = "android")]
 #[no_mangle]
 pub unsafe extern "C" fn Java_com_example_godotwry_WryActivity_stop(
     _env: jni::JNIEnv,
@@ -1238,6 +1244,7 @@ pub unsafe extern "C" fn Java_com_example_godotwry_WryActivity_stop(
     godot_print!("[Godot WRY JNI] Native lifecycle hook: stop executed.");
 }
 
+#[cfg(target_os = "android")]
 #[no_mangle]
 pub unsafe extern "C" fn Java_com_example_godotwry_WryActivity_save(
     _env: jni::JNIEnv,
@@ -1246,6 +1253,7 @@ pub unsafe extern "C" fn Java_com_example_godotwry_WryActivity_save(
     // Handles state serialization checkpoints if needed
 }
 
+#[cfg(target_os = "android")]
 #[no_mangle]
 pub unsafe extern "C" fn Java_com_example_godotwry_WryActivity_destroy(
     _env: jni::JNIEnv,
