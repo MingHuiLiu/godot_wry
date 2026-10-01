@@ -14,7 +14,9 @@ use std::cell::RefCell;
 use std::collections::{hash_map::DefaultHasher, HashMap};
 use std::fs;
 use std::hash::{Hash, Hasher};
-use std::io::{self, BufRead, BufReader, Write};
+use std::io::{self, Read, Write};
+use std::os::fd::AsRawFd;
+use std::os::unix::fs::PermissionsExt;
 use std::os::unix::net::{UnixListener, UnixStream};
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
@@ -124,19 +126,81 @@ fn write_message(stream: &mut UnixStream, message: &BridgeMessage) -> io::Result
     stream.write_all(&encoded)
 }
 
+struct MessageReader {
+    stream: UnixStream,
+    buffer: Vec<u8>,
+}
+
+impl MessageReader {
+    fn new(stream: UnixStream) -> Self {
+        Self {
+            stream,
+            buffer: Vec::new(),
+        }
+    }
+
+    fn is_readable(&self) -> io::Result<bool> {
+        let mut poll_fd = libc::pollfd {
+            fd: self.stream.as_raw_fd(),
+            events: libc::POLLIN,
+            revents: 0,
+        };
+        let result = unsafe { libc::poll(&mut poll_fd, 1, 0) };
+        if result < 0 {
+            return Err(io::Error::last_os_error());
+        }
+        Ok(result > 0
+            && poll_fd.revents
+                & (libc::POLLIN | libc::POLLHUP | libc::POLLERR | libc::POLLNVAL)
+                != 0)
+    }
+
+    fn read_messages(&mut self) -> io::Result<(Vec<BridgeMessage>, bool)> {
+        let mut eof = false;
+        let mut chunk = [0u8; 8192];
+
+        while self.is_readable()? {
+            match self.stream.read(&mut chunk) {
+                Ok(0) => {
+                    eof = true;
+                    break;
+                }
+                Ok(read) => self.buffer.extend_from_slice(&chunk[..read]),
+                Err(error) if error.kind() == io::ErrorKind::Interrupted => continue,
+                Err(error) => return Err(error),
+            }
+        }
+
+        let mut messages = Vec::new();
+        while let Some(newline) = self.buffer.iter().position(|byte| *byte == b'\n') {
+            let mut line: Vec<u8> = self.buffer.drain(..=newline).collect();
+            line.pop();
+            if line.last() == Some(&b'\r') {
+                line.pop();
+            }
+            if line.is_empty() {
+                continue;
+            }
+            let message = serde_json::from_slice::<BridgeMessage>(&line)
+                .map_err(|error| io::Error::new(io::ErrorKind::InvalidData, error))?;
+            messages.push(message);
+        }
+
+        Ok((messages, eof))
+    }
+}
+
 pub struct EditorBridgeClient {
-    reader: RefCell<BufReader<UnixStream>>,
+    reader: RefCell<MessageReader>,
     writer: Mutex<UnixStream>,
 }
 
 impl EditorBridgeClient {
     pub fn connect() -> io::Result<Self> {
         let stream = UnixStream::connect(project_socket_path())?;
-        stream.set_nonblocking(true)?;
         let writer = stream.try_clone()?;
-        writer.set_nonblocking(false)?;
         let client = Self {
-            reader: RefCell::new(BufReader::new(stream)),
+            reader: RefCell::new(MessageReader::new(stream)),
             writer: Mutex::new(writer),
         };
         client.send(&BridgeMessage::Hello {
@@ -153,30 +217,13 @@ impl EditorBridgeClient {
     }
 
     pub fn poll(&self) -> io::Result<Vec<BridgeMessage>> {
-        let mut messages = Vec::new();
-        let mut reader = self.reader.borrow_mut();
-        loop {
-            let mut line = String::new();
-            match reader.read_line(&mut line) {
-                Ok(0) => break,
-                Ok(_) => {
-                    if line.trim().is_empty() {
-                        continue;
-                    }
-                    let message = serde_json::from_str::<BridgeMessage>(line.trim())
-                        .map_err(|error| io::Error::new(io::ErrorKind::InvalidData, error))?;
-                    messages.push(message);
-                }
-                Err(error) if error.kind() == io::ErrorKind::WouldBlock => break,
-                Err(error) => return Err(error),
-            }
-        }
+        let (messages, _eof) = self.reader.borrow_mut().read_messages()?;
         Ok(messages)
     }
 }
 
 struct BridgeConnection {
-    reader: BufReader<UnixStream>,
+    reader: MessageReader,
     writer: Arc<Mutex<UnixStream>>,
     hosts: HashMap<u64, HostedWebView>,
     pending_hosts: HashMap<u64, (BridgeConfig, BridgeBounds)>,
@@ -185,11 +232,9 @@ struct BridgeConnection {
 
 impl BridgeConnection {
     fn new(stream: UnixStream) -> io::Result<Self> {
-        stream.set_nonblocking(true)?;
         let writer_stream = stream.try_clone()?;
-        writer_stream.set_nonblocking(false)?;
         Ok(Self {
-            reader: BufReader::new(stream),
+            reader: MessageReader::new(stream),
             writer: Arc::new(Mutex::new(writer_stream)),
             hosts: HashMap::new(),
             pending_hosts: HashMap::new(),
@@ -204,28 +249,7 @@ impl BridgeConnection {
     }
 
     fn read_available(&mut self) -> io::Result<(Vec<BridgeMessage>, bool)> {
-        let mut messages = Vec::new();
-        loop {
-            let mut line = String::new();
-            match self.reader.read_line(&mut line) {
-                Ok(0) => return Ok((messages, true)),
-                Ok(_) => {
-                    if line.trim().is_empty() {
-                        continue;
-                    }
-                    match serde_json::from_str::<BridgeMessage>(line.trim()) {
-                        Ok(message) => messages.push(message),
-                        Err(error) => {
-                            godot_warn!("[Godot WRY] Ignoring invalid editor bridge message: {error}");
-                        }
-                    }
-                }
-                Err(error) if error.kind() == io::ErrorKind::WouldBlock => {
-                    return Ok((messages, false));
-                }
-                Err(error) => return Err(error),
-            }
-        }
+        self.reader.read_messages()
     }
 
     fn handle(&mut self, message: BridgeMessage) {
@@ -684,6 +708,7 @@ impl EditorBridgeServer {
             let _ = fs::remove_file(&socket_path);
         }
         let listener = UnixListener::bind(&socket_path)?;
+        fs::set_permissions(&socket_path, fs::Permissions::from_mode(0o600))?;
         listener.set_nonblocking(true)?;
         godot_print!(
             "[Godot WRY] Godot 4.7 editor bridge listening at {}",
