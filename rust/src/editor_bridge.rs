@@ -19,7 +19,6 @@ use std::os::unix::net::{UnixListener, UnixStream};
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 use std::sync::atomic::{AtomicU64, Ordering};
-use objc2_app_kit::NSWindow;
 use wry::WebViewExtMacOS;
 use wry::dpi::{PhysicalPosition, PhysicalSize};
 use wry::http::Request;
@@ -507,9 +506,7 @@ impl HostedWebView {
                 .window_get_native_handle_ex(HandleType::WINDOW_HANDLE)
                 .window_id(new_window_id)
                 .done();
-            let ns_window = std::ptr::with_exposed_provenance_mut::<NSWindow>(
-                native_window as usize,
-            );
+            let ns_window = std::ptr::with_exposed_provenance_mut(native_window as usize);
             if ns_window.is_null() || self.webview.reparent(ns_window).is_err() {
                 let _ = self.webview.set_visible(false);
                 return;
