@@ -51,23 +51,36 @@ The easiest way to install Godot WRY is through Godot's [Asset Library](https://
 4. Click on the Godot WRY extension and click **Download**.
 5. In the configuration dialog, click **Install**.
 
-### GitHub Actions / releases
+### GitHub Releases
 
-The build workflow and GitHub Releases publish three ready-to-use packages:
+Starting with **v0.3.0**, mobile packages are self-contained for Godot 4.7:
 
-- `godot_wry` — all desktop + Android + iOS binaries.
-- `godot_wry-android` — Android arm64-v8a/x86_64 binaries plus the WRY Kotlin/Gradle integration.
-- `godot_wry-ios` — the iOS arm64 device xcframework.
+- `godot_wry.zip` — all-platform addon binaries.
+- `godot_wry-android-godot4.7.zip` — Android package for Godot 4.7 Standard.
+- `godot_wry-android-godot4.7-mono.zip` — Android package for Godot 4.7 Mono.
+- `godot_wry-ios-godot4.7.zip` — iOS package with device/simulator XCFramework and bundled Standard + Mono Godot 4.7 iOS export templates.
 
-Each artifact is rooted at `addons/godot_wry`, so extract it directly into an existing Godot project.
+#### Android
 
-For Android, install Godot's Android Build Template once, then run:
+Choose the package matching your Godot editor edition and extract it into the **project root**. It already contains `addons/godot_wry` and a complete, pre-integrated `android/build` Gradle Build Template with the official Godot 4.7 AARs, WRY Kotlin bridge and `WryActivity`.
+
+Enable **Gradle Build** in the Android export preset and export normally. No extra template download and no `install.py` step are required for these Release bundles.
+
+#### iOS
+
+Extract `godot_wry-ios-godot4.7.zip` into the project root. The addon includes:
+
+- arm64 iPhone/iPad device support.
+- arm64 + x86_64 iOS Simulator support.
+- the official Godot 4.7 Standard and Mono `ios.zip` export templates.
+
+Install the already-bundled templates once on the Mac:
 
 ```sh
-python addons/godot_wry/android/install.py
+python3 godot_wry_ios/install_templates.py
 ```
 
-After that, export Android with **Gradle Build** enabled.
+The installer only copies files from the Release into Godot's local export-template directories; it performs **no network download**. After that, export iOS normally from Godot 4.7.
 
 ### Godot 4.7 embedded Game workspace
 
@@ -101,8 +114,8 @@ Please refer to the [Docs](https://godot-wry.doce.sh) for API reference and in-d
 | **Windows (10, 11)**            | ✅ Supported   | WebView2 (Chromium)        |
 | **Mac (Intel, Apple Sillicon)** | ✅ Supported   | WebKit                     |
 | **Linux (X11)**                 | 🚧 Supported\* | WebKitGTK                  |
-| **Android (arm64, x86_64)**     | 🚧 Supported\* | Android WebView (Chromium) |
-| **iOS (arm64 device)**          | 🚧 Supported\* | WebKit                     |
+| **Android (arm64, x86_64)**     | ✅ Supported   | Android WebView (Chromium) |
+| **iOS (device + simulator)**     | ✅ Supported   | WebKit                     |
 | **Browser/HTML5**               | ⏳ Planned     | —                          |
 
 ### Linux
@@ -113,11 +126,13 @@ Please refer to the [Docs](https://godot-wry.doce.sh) for API reference and in-d
 
 ### Android
 
-\* Android support uses WRY's native Android bridge and requires Godot's Gradle-based Android Build Template. The packaged `install.py` wires the generated Kotlin bridge and WRY-compatible `GodotActivity` subclass into an existing project. Native packages are built for arm64-v8a devices and x86_64 emulators.
+Release bundles include the complete Godot 4.7 Gradle Build Template and are provided separately for Standard and Mono so the embedded Godot runtime exactly matches the editor edition. Native WRY libraries are built for arm64-v8a devices and x86_64 emulators.
+
+The lower-level `addons/godot_wry/android/install.py` remains available for users maintaining a custom Android Build Template, but it is not needed for the self-contained v0.3.0 Release bundles.
 
 ### iOS
 
-\* iOS exports currently ship a device-only arm64 xcframework. Simulator slices are not included yet. Build locally on macOS with Xcode using `just build-ios`.
+The iOS Release includes a single XCFramework with an arm64 device slice and a universal arm64/x86_64 simulator slice. Because Godot stores iOS export templates in its user-level template directory rather than inside each project, the Release includes the official Godot 4.7 Standard and Mono `ios.zip` files plus a local copy-only installer.
 
 ## ❌ Caveats
 
@@ -125,7 +140,6 @@ Please refer to the [Docs](https://godot-wry.doce.sh) for API reference and in-d
 - Webview always renders on top
 - Different browser engines across platforms
 - No automatic dependency checks
-- iOS support is device-only for now
 
 You can learn more about these caveats on the [Caveats](https://godot-wry.doce.sh/about/caveats.html) documentation page.
 
