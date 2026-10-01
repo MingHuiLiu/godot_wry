@@ -16,7 +16,7 @@ use std::fs;
 use std::hash::{Hash, Hasher};
 use std::io::{self, BufRead, BufReader, Write};
 use std::os::unix::net::{UnixListener, UnixStream};
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 use std::sync::atomic::{AtomicU64, Ordering};
 use wry::dpi::{PhysicalPosition, PhysicalSize};
@@ -115,7 +115,7 @@ impl EditorBridgeClient {
     pub fn connect() -> io::Result<Self> {
         let stream = UnixStream::connect(project_socket_path())?;
         stream.set_nonblocking(true)?;
-        let mut writer = stream.try_clone()?;
+        let writer = stream.try_clone()?;
         writer.set_nonblocking(false)?;
         let client = Self {
             reader: RefCell::new(BufReader::new(stream)),
@@ -301,7 +301,7 @@ impl BridgeConnection {
             BridgeMessage::Destroy { id } => {
                 self.hosts.remove(&id);
             }
-            BridgeMessage::Event { .. } | BridgeMessage::Error { .. } | BridgeMessage::Hello { .. } | BridgeMessage::Create { .. } => {}
+            BridgeMessage::Event { .. } | BridgeMessage::Error { .. } | BridgeMessage::Create { .. } => {}
         }
     }
 }
@@ -492,7 +492,9 @@ fn editor_content_scale(control: &Gd<Control>) -> (f32, f32) {
 }
 
 fn embed_size_mode() -> i64 {
-    let settings = EditorInterface::singleton().get_editor_settings();
+    let Some(mut settings) = EditorInterface::singleton().get_editor_settings() else {
+        return 0;
+    };
     let result = settings.call(
         "get_project_metadata",
         &[
