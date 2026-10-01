@@ -489,6 +489,208 @@ jobs:
           path: package-ios
           if-no-files-found: error
 
+  android-turnkey:
+    name: 📦 Android turnkey / ${{ matrix.edition }}
+    needs: [package]
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - edition: standard
+            template_id: 4.7.stable
+            tpz_url: https://github.com/godotengine/godot/releases/download/4.7-stable/Godot_v4.7-stable_export_templates.tpz
+            editor_url: https://github.com/godotengine/godot/releases/download/4.7-stable/Godot_v4.7-stable_linux.x86_64.zip
+            artifact_name: godot_wry-android-godot4.7-standard
+          - edition: mono
+            template_id: 4.7.stable.mono
+            tpz_url: https://github.com/godotengine/godot/releases/download/4.7-stable/Godot_v4.7-stable_mono_export_templates.tpz
+            editor_url: https://github.com/godotengine/godot/releases/download/4.7-stable/Godot_v4.7-stable_mono_linux_x86_64.zip
+            artifact_name: godot_wry-android-godot4.7-mono
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Download all-platform addon
+        uses: actions/download-artifact@v4
+        with:
+          name: godot_wry
+          path: base-package
+
+      - name: Install Java 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - name: Install .NET runtime for Mono editor
+        if: ${{ matrix.edition == 'mono' }}
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: "8.0.x"
+
+      - name: Install Android SDK components
+        run: |
+          yes | sdkmanager --licenses >/dev/null || true
+          sdkmanager \
+            "platforms;android-36" \
+            "build-tools;36.1.0" \
+            "ndk;29.0.14206865"
+
+      - name: Extract official Godot 4.7 Android Build Template
+        run: |
+          python3 scripts/fetch_remote_zip_member.py \
+            "${{ matrix.tpz_url }}" \
+            templates/android_source.zip \
+            android_source.zip
+          python3 -m zipfile -t android_source.zip
+
+      - name: Assemble turnkey Android package
+        run: |
+          python3 scripts/package_turnkey_android.py \
+            --repo . \
+            --addon-source base-package/addons/godot_wry \
+            --android-source android_source.zip \
+            --template-id "${{ matrix.template_id }}" \
+            --output turnkey
+
+          test -f turnkey/android/build/libs/debug/*.aar
+          test -f turnkey/android/build/libs/release/*.aar
+          test -f turnkey/android/.build_version
+          test -f turnkey/android/.gdignore
+          grep -q 'addons/godot_wry/android/godot_wry.gradle' turnkey/android/build/build.gradle
+
+      - name: Download matching Godot 4.7 editor
+        run: |
+          curl -L --fail --retry 3 \
+            -o godot47-editor.zip \
+            "${{ matrix.editor_url }}"
+          unzip -q godot47-editor.zip -d godot47-editor
+          GODOT_BIN="$(find godot47-editor -type f -name 'Godot*' -perm -111 | head -1)"
+          test -n "$GODOT_BIN"
+          chmod +x "$GODOT_BIN"
+          echo "GODOT_BIN=$GODOT_BIN" >> "$GITHUB_ENV"
+          "$GODOT_BIN" --version
+
+      - name: Create Android export smoke project
+        run: |
+          mkdir -p turnkey/web turnkey/build
+          cat > turnkey/project.godot <<'EOF'
+          [application]
+          config/name="Godot WRY Android Turnkey Smoke"
+          run/main_scene="res://main.tscn"
+          config/features=PackedStringArray("4.7", "GL Compatibility")
+
+          [rendering]
+          renderer/rendering_method="gl_compatibility"
+          renderer/rendering_method.mobile="gl_compatibility"
+          EOF
+
+          cat > turnkey/main.tscn <<'EOF'
+          [gd_scene format=3]
+
+          [node name="Main" type="Control"]
+          layout_mode = 3
+          anchors_preset = 15
+          anchor_right = 1.0
+          anchor_bottom = 1.0
+
+          [node name="WebView" type="WebView" parent="."]
+          layout_mode = 1
+          anchors_preset = 15
+          anchor_right = 1.0
+          anchor_bottom = 1.0
+          url = "res://web/index.html"
+          EOF
+
+          cat > turnkey/web/index.html <<'EOF'
+          <!doctype html><html><body>GODOT_WRY_ANDROID_TURNKEY_OK</body></html>
+          EOF
+
+          cat > turnkey/export_presets.cfg <<'EOF'
+          [preset.0]
+
+          name="Android"
+          platform="Android"
+          runnable=true
+          dedicated_server=false
+          custom_features=""
+          export_filter="all_resources"
+          include_filter="web/*.html"
+          exclude_filter=""
+          export_path="build/godot-wry-turnkey.apk"
+          patches=PackedStringArray()
+          patch_delta_encoding=false
+          patch_delta_compression_level_zstd=19
+          patch_delta_min_reduction=0.1
+          patch_delta_include_filters="*"
+          patch_delta_exclude_filters=""
+          encryption_include_filters=""
+          encryption_exclude_filters=""
+          seed=0
+          encrypt_pck=false
+          encrypt_directory=false
+          script_export_mode=2
+
+          [preset.0.options]
+
+          custom_template/debug=""
+          custom_template/release=""
+          gradle_build/use_gradle_build=true
+          gradle_build/gradle_build_directory=""
+          gradle_build/android_source_template=""
+          gradle_build/compress_native_libraries=true
+          gradle_build/export_format=0
+          gradle_build/min_sdk="26"
+          gradle_build/target_sdk="35"
+          gradle_build/custom_theme_attributes={}
+          architectures/armeabi-v7a=false
+          architectures/arm64-v8a=true
+          architectures/x86=false
+          architectures/x86_64=false
+          version/code=1
+          version/name="0.3.0-smoke"
+          package/unique_name="com.minghuiliu.godotwry.turnkeysmoke"
+          package/name="Godot WRY Turnkey Smoke"
+          package/signed=false
+          graphics/opengl_debug=false
+          shader_baker/enabled=false
+          xr_features/xr_mode=0
+          screen/immersive_mode=true
+          permissions/internet=true
+          permissions/access_network_state=true
+          EOF
+
+      - name: Export APK without installing any template
+        run: |
+          "$GODOT_BIN" --headless --editor --path turnkey --quit
+          "$GODOT_BIN" --headless --path turnkey \
+            --export-debug Android turnkey/build/godot-wry-turnkey.apk
+
+          APK=turnkey/build/godot-wry-turnkey.apk
+          test -f "$APK"
+          unzip -l "$APK" | tee apk-contents.txt
+          grep -q 'lib/arm64-v8a/libgodot_wry.so' apk-contents.txt
+          grep -q 'assets/web/index.html' apk-contents.txt
+
+          AAPT="$ANDROID_HOME/build-tools/36.1.0/aapt"
+          "$AAPT" dump xmltree "$APK" AndroidManifest.xml > manifest.txt
+          grep -q 'com.example.godotwry.WryActivity' manifest.txt
+          grep -q 'com.godot.game.GodotAppLauncher' manifest.txt
+
+      - name: Remove smoke-only project files
+        run: |
+          rm -rf turnkey/.godot turnkey/build turnkey/web
+          rm -f turnkey/project.godot turnkey/main.tscn turnkey/export_presets.cfg
+
+      - name: Upload turnkey Android package
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.artifact_name }}
+          path: turnkey
+          if-no-files-found: error
+
   release:
     name: 🚀 Publish GitHub Release
     needs: [package]
