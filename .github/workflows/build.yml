@@ -209,6 +209,9 @@ jobs:
           config/name="Godot WRY iOS Smoke"
           run/main_scene="res://main.tscn"
           config/features=PackedStringArray("4.7", "Mobile")
+
+          [rendering]
+          textures/vram_compression/import_etc2_astc=true
           EOF
 
           cat > turnkey-ios/main.tscn <<'EOF'
