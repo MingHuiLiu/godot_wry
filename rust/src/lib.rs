@@ -43,6 +43,8 @@ use std::collections::HashMap;
 use std::cell::Cell;
 use std::sync::{Arc, Mutex};
 use std::path::PathBuf;
+#[cfg(target_os = "macos")]
+use std::fs;
 use wry::{WebViewBuilder, WebContext, Rect, WebViewAttributes, PageLoadEvent};
 use wry::dpi::{PhysicalPosition, PhysicalSize};
 use wry::http::Request;
@@ -66,6 +68,85 @@ use {
 #[link(name = "wevtapi")]
 extern "system" {}
 
+#[cfg(target_os = "macos")]
+fn install_bundled_ios_export_templates() {
+    // The turnkey iOS release carries both official Godot 4.7 Standard and
+    // Mono ios.zip templates under the addon. Installing them here makes the
+    // package fully offline: extracting it into a project and opening that
+    // project in the editor is enough to make iOS export available.
+    //
+    // The bundled templates are patched only to add WebKit to OTHER_LDFLAGS,
+    // which the static WRY XCFramework needs. Preserve an existing template
+    // once before replacing it so users can restore their original file.
+    let project_settings = ProjectSettings::singleton();
+    let Some(home) = std::env::var_os("HOME") else {
+        godot_warn!("[Godot WRY] HOME is unavailable; cannot auto-install bundled iOS templates");
+        return;
+    };
+
+    let template_root = PathBuf::from(home)
+        .join("Library")
+        .join("Application Support")
+        .join("Godot")
+        .join("export_templates");
+
+    let editions = [
+        ("standard", "4.7.stable"),
+        ("mono", "4.7.stable.mono"),
+    ];
+
+    for (edition, version_dir) in editions {
+        let source = PathBuf::from(
+            project_settings
+                .globalize_path(&format!(
+                    "res://addons/godot_wry/ios/templates/{edition}/ios.zip"
+                ))
+                .to_string(),
+        );
+        if !source.is_file() {
+            continue;
+        }
+
+        let destination_dir = template_root.join(version_dir);
+        let destination = destination_dir.join("ios.zip");
+
+        let source_len = fs::metadata(&source).map(|m| m.len()).unwrap_or(0);
+        let destination_len = fs::metadata(&destination).map(|m| m.len()).unwrap_or(0);
+        if source_len != 0 && source_len == destination_len {
+            continue;
+        }
+
+        if let Err(error) = fs::create_dir_all(&destination_dir) {
+            godot_warn!(
+                "[Godot WRY] Could not create iOS template directory {}: {error}",
+                destination_dir.display()
+            );
+            continue;
+        }
+
+        if destination.is_file() {
+            let backup = destination_dir.join("ios.zip.godot-wry-original");
+            if !backup.exists() {
+                if let Err(error) = fs::copy(&destination, &backup) {
+                    godot_warn!(
+                        "[Godot WRY] Could not back up existing {edition} iOS template: {error}"
+                    );
+                    continue;
+                }
+            }
+        }
+
+        match fs::copy(&source, &destination) {
+            Ok(_) => godot_print!(
+                "[Godot WRY] Installed bundled Godot 4.7 {edition} iOS export template (offline)"
+            ),
+            Err(error) => godot_warn!(
+                "[Godot WRY] Could not install bundled {edition} iOS template: {error}"
+            ),
+        }
+    }
+}
+
 struct GodotWRY;
 
 #[gdextension]
@@ -73,6 +154,7 @@ unsafe impl ExtensionLibrary for GodotWRY {
     fn on_stage_init(stage: InitStage) {
         #[cfg(target_os = "macos")]
         if stage == InitStage::MainLoop && Engine::singleton().is_editor_hint() {
+            install_bundled_ios_export_templates();
             editor_bridge::start_editor_server();
         }
     }
