@@ -171,16 +171,13 @@ jobs:
             '*/project.pbxproj' | grep -q -- '-framework WebKit'
           cp third_party/godot/LICENSE.txt turnkey-ios/THIRD_PARTY_NOTICES/GODOT_LICENSE.txt
 
-      - name: Validate offline iOS template installer
+      - name: Validate manual iOS template installer fallback
         run: |
           TEMPLATE_ROOT="$RUNNER_TEMP/godot-wry-template-test"
           python3 turnkey-ios/addons/godot_wry/ios/install.py \
             --template-root "$TEMPLATE_ROOT"
           test -f "$TEMPLATE_ROOT/4.7.stable/ios.zip"
           test -f "$TEMPLATE_ROOT/4.7.stable.mono/ios.zip"
-
-          python3 turnkey-ios/addons/godot_wry/ios/install.py \
-            --template-root "$HOME/Library/Application Support/Godot/export_templates"
 
       - name: Download Godot 4.7 Standard and Mono editors
         run: |
@@ -293,8 +290,17 @@ jobs:
           privacy/tracking_domains=PackedStringArray()
           EOF
 
+          rm -rf "$HOME/Library/Application Support/Godot/export_templates/4.7.stable" \
+                 "$HOME/Library/Application Support/Godot/export_templates/4.7.stable.mono"
+
           mkdir -p turnkey-ios/build
           "$GODOT_BIN" --headless --editor --path turnkey-ios --quit
+
+          # Zero-step turnkey check: opening the project must install the bundled
+          # Standard and Mono ios.zip files without running install.py or downloading.
+          test -f "$HOME/Library/Application Support/Godot/export_templates/4.7.stable/ios.zip"
+          test -f "$HOME/Library/Application Support/Godot/export_templates/4.7.stable.mono/ios.zip"
+
           "$GODOT_BIN" --headless --path turnkey-ios \
             --export-debug iOS turnkey-ios/build/GodotWryIOSSmoke.xcodeproj
 
@@ -847,10 +853,10 @@ jobs:
           or framework copy step are required.
 
           The Release ZIP also contains both official Godot 4.7 Standard and Mono
-          `ios.zip` export templates. Install both bundled templates offline with
-          `python addons/godot_wry/ios/install.py` (or select one with `--edition`).
-          No Godot iOS template download is required. Apple's Xcode is still required
-          to build and sign native iOS applications.
+          `ios.zip` export templates. Opening the extracted project in Godot on macOS
+          installs those templates automatically and offline; `ios/install.py` is kept
+          only as a manual fallback. No Godot iOS template download is required.
+          Apple's Xcode is still required to build and sign native iOS applications.
 
           ### CI validation
 
@@ -861,6 +867,7 @@ jobs:
           - Android **Standard turnkey ZIP → clean project → APK export**
           - Android **Mono turnkey ZIP → clean project → APK export**
           - iOS static XCFramework contains device and simulator slices
+          - opening the turnkey iOS project auto-installs bundled Standard/Mono templates offline
           - Godot 4.7 **iOS project export** includes the XCFramework and GDExtension entry symbol
           - Xcode builds the exported iOS project for the iOS Simulator
           - Godot 4.7 GDExtension load smoke test
