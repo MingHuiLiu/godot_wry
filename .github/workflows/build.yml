@@ -171,13 +171,15 @@ jobs:
             '*/project.pbxproj' | grep -q -- '-framework WebKit'
           cp third_party/godot/LICENSE.txt turnkey-ios/THIRD_PARTY_NOTICES/GODOT_LICENSE.txt
 
-      - name: Validate manual iOS template installer fallback
+      - name: Validate self-contained iOS setup fallback
         run: |
           TEMPLATE_ROOT="$RUNNER_TEMP/godot-wry-template-test"
-          python3 turnkey-ios/addons/godot_wry/ios/install.py \
+          bash turnkey-ios/addons/godot_wry/ios/setup.command \
             --template-root "$TEMPLATE_ROOT"
           test -f "$TEMPLATE_ROOT/4.7.stable/ios.zip"
           test -f "$TEMPLATE_ROOT/4.7.stable.mono/ios.zip"
+          codesign --verify --deep --strict \
+            turnkey-ios/addons/godot_wry/bin/universal-apple-darwin/libgodot_wry.framework
 
       - name: Download Godot 4.7 Standard and Mono editors
         run: |
@@ -857,8 +859,11 @@ jobs:
 
           The Release ZIP also contains both official Godot 4.7 Standard and Mono
           `ios.zip` export templates. Opening the extracted project in Godot on macOS
-          installs those templates automatically and offline; `ios/install.py` is kept
-          only as a manual fallback. No Godot iOS template download is required.
+          installs those templates automatically and offline. If macOS Gatekeeper marks a
+          browser-downloaded addon as quarantined, run the bundled
+          `bash addons/godot_wry/ios/setup.command`; it clears quarantine only for this
+          addon, refreshes the local ad-hoc signature, and installs both bundled templates.
+          It does not disable Gatekeeper and performs no network download.
           Apple's Xcode is still required to build and sign native iOS applications.
 
           ### CI validation
