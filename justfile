@@ -53,6 +53,8 @@ build-macos-universal:
 	lipo -create -output ./target/release/libgodot_wry.dylib ./target/aarch64-apple-darwin/release/libgodot_wry.dylib ./target/x86_64-apple-darwin/release/libgodot_wry.dylib
 	mv ./target/release/libgodot_wry.dylib ./target/release/libgodot_wry.framework/libgodot_wry.dylib
 	cp ../assets/Info.plist ./target/release/libgodot_wry.framework/Resources/Info.plist
+	codesign --force --deep --sign - --timestamp=none ./target/release/libgodot_wry.framework
+	codesign --verify --deep --strict ./target/release/libgodot_wry.framework
 	mkdir -p ../godot/addons/godot_wry/bin/universal-apple-darwin
 	cp -R ./target/release/libgodot_wry.framework ../godot/addons/godot_wry/bin/universal-apple-darwin
 
