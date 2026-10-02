@@ -78,8 +78,19 @@ so no additional Godot template download is required.
 
 On macOS, opening the project in Godot automatically installs the bundled iOS
 templates offline. If an existing template must be replaced, Godot WRY keeps a
-one-time `ios.zip.godot-wry-original` backup first. The bundled
-`addons/godot_wry/ios/install.py` remains available only as a manual fallback.
+one-time `ios.zip.godot-wry-original` backup first.
+
+If macOS reports that the GitHub-downloaded native library cannot be checked for
+malware, run the **bundled offline setup** from the project root:
+
+```sh
+bash addons/godot_wry/ios/setup.command
+```
+
+That script removes `com.apple.quarantine` only from this addon copy, refreshes
+its local ad-hoc signature, and installs the bundled Standard + Mono iOS
+templates. It does not disable Gatekeeper and downloads nothing. The lower-level
+`addons/godot_wry/ios/install.py` is retained as an advanced/manual fallback.
 
 Godot 4.7 then links the included static XCFramework automatically. It contains
 arm64 device, arm64 simulator, and x86_64 simulator slices, so no WRY-specific
