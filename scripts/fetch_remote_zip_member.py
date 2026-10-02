@@ -13,9 +13,7 @@ import struct
 import sys
 import time
 import urllib.error
-import urllib.error
 import urllib.request
-import time
 import zlib
 from pathlib import Path
 
@@ -61,7 +59,7 @@ def get_range(url: str, start: int, end: int) -> tuple[bytes, dict[str, str], in
 
 
 def get_range_chunked(
-    url: str, start: int, end: int, chunk_size: int = 16 * 1024 * 1024
+    url: str, start: int, end: int, chunk_size: int = 8 * 1024 * 1024
 ) -> bytes:
     chunks: list[bytes] = []
     current = start
