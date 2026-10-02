@@ -13,7 +13,9 @@ import struct
 import sys
 import time
 import urllib.error
+import urllib.error
 import urllib.request
+import time
 import zlib
 from pathlib import Path
 
@@ -122,9 +124,7 @@ def find_member(url: str, member: str) -> tuple[int, int, int, int, int]:
         raise RuntimeError("Invalid EOCD signature")
 
     cd_end = cd_offset + cd_size - 1
-    central, _, status = get_range(url, cd_offset, cd_end)
-    if status != 206:
-        raise RuntimeError("Could not read ZIP central directory")
+    central = get_range_chunked(url, cd_offset, cd_end)
 
     pos = 0
     for _ in range(entries_total):
