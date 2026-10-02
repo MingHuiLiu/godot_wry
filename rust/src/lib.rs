@@ -140,9 +140,11 @@ fn install_bundled_ios_export_templates() {
             Ok(_) => godot_print!(
                 "[Godot WRY] Installed bundled Godot 4.7 {edition} iOS export template (offline)"
             ),
-            Err(error) => godot_warn!(
-                "[Godot WRY] Could not install bundled {edition} iOS template: {error}"
-            ),
+            Err(error) => {
+                godot_warn!(
+                    "[Godot WRY] Could not install bundled {edition} iOS template: {error}"
+                );
+            }
         }
     }
 }
