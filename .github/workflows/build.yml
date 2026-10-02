@@ -14,6 +14,10 @@ on:
 permissions:
   contents: read
 
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
 # CI builds distributable Godot addon artifacts for desktop, Android and iOS.
 jobs:
   desktop:
@@ -83,7 +87,8 @@ jobs:
           if-no-files-found: error
 
   ios:
-    name: 📱 iOS / arm64 device
+    name: 📱 iOS / device + simulator turnkey
+    needs: [desktop]
     runs-on: macos-latest
 
     steps:
@@ -93,29 +98,274 @@ jobs:
       - name: Install Rust
         uses: dtolnay/rust-toolchain@stable
         with:
-          targets: aarch64-apple-ios
+          targets: aarch64-apple-ios,aarch64-apple-ios-sim,x86_64-apple-ios
 
       - name: Install Just
         uses: extractions/setup-just@v2
 
-      - name: Build iOS xcframework
+      - name: Build static iOS XCFramework
         run: just build-ios
 
-      - name: Validate iOS package
+      - name: Validate iOS XCFramework
         run: |
-          test -f godot/addons/godot_wry/bin/aarch64-apple-ios/libgodot_wry.xcframework/Info.plist
-          test -d godot/addons/godot_wry/bin/aarch64-apple-ios/libgodot_wry.xcframework
+          XC=godot/addons/godot_wry/bin/ios/libgodot_wry.xcframework
+          test -f "$XC/Info.plist"
+          test "$(find "$XC" -name 'libgodot_wry.a' | wc -l | tr -d ' ')" -eq 2
+          plutil -p "$XC/Info.plist"
+          nm -gU "$(find "$XC" -path '*ios-arm64/*' -name 'libgodot_wry.a' | head -1)" | grep gdext_rust_init
+          nm -gU "$(find "$XC" -path '*ios-arm64_x86_64-simulator/*' -name 'libgodot_wry.a' | head -1)" | grep gdext_rust_init
 
-      - name: Stage iOS artifact
+      - name: Build iOS turnkey package
+        run: |
+          mkdir -p turnkey-ios/addons
+          cp -R godot/addons/godot_wry turnkey-ios/addons/
+          find turnkey-ios/addons/godot_wry/bin -mindepth 1 -maxdepth 1 \
+            ! -name ios -exec rm -rf {} +
+          rm -rf turnkey-ios/addons/godot_wry/android/kotlin
+
+      - name: Add Linux host binaries to iOS package
+        uses: actions/download-artifact@v4
+        with:
+          name: desktop-x86_64-unknown-linux-gnu
+          path: turnkey-ios/addons/godot_wry
+
+      - name: Add macOS host binaries to iOS package
+        uses: actions/download-artifact@v4
+        with:
+          name: desktop-universal-apple-darwin
+          path: turnkey-ios/addons/godot_wry
+
+      - name: Add Windows host binaries to iOS package
+        uses: actions/download-artifact@v4
+        with:
+          name: desktop-x86_64-pc-windows-msvc
+          path: turnkey-ios/addons/godot_wry
+
+      - name: Bundle official Godot 4.7 iOS export templates
+        run: |
+          mkdir -p \
+            turnkey-ios/addons/godot_wry/ios/templates/standard \
+            turnkey-ios/addons/godot_wry/ios/templates/mono \
+            turnkey-ios/THIRD_PARTY_NOTICES
+
+          python3 scripts/fetch_remote_zip_member.py \
+            https://github.com/godotengine/godot/releases/download/4.7-stable/Godot_v4.7-stable_export_templates.tpz \
+            templates/ios.zip \
+            turnkey-ios/addons/godot_wry/ios/templates/standard/ios.zip
+
+          python3 scripts/fetch_remote_zip_member.py \
+            https://github.com/godotengine/godot/releases/download/4.7-stable/Godot_v4.7-stable_mono_export_templates.tpz \
+            templates/ios.zip \
+            turnkey-ios/addons/godot_wry/ios/templates/mono/ios.zip
+
+          python3 scripts/patch_turnkey_ios_template.py \
+            turnkey-ios/addons/godot_wry/ios/templates/standard/ios.zip
+          python3 scripts/patch_turnkey_ios_template.py \
+            turnkey-ios/addons/godot_wry/ios/templates/mono/ios.zip
+
+          python3 -m zipfile -t turnkey-ios/addons/godot_wry/ios/templates/standard/ios.zip
+          python3 -m zipfile -t turnkey-ios/addons/godot_wry/ios/templates/mono/ios.zip
+          unzip -p turnkey-ios/addons/godot_wry/ios/templates/standard/ios.zip \
+            '*/project.pbxproj' | grep -q -- '-framework WebKit'
+          unzip -p turnkey-ios/addons/godot_wry/ios/templates/mono/ios.zip \
+            '*/project.pbxproj' | grep -q -- '-framework WebKit'
+          cp third_party/godot/LICENSE.txt turnkey-ios/THIRD_PARTY_NOTICES/GODOT_LICENSE.txt
+
+      - name: Validate self-contained iOS setup fallback
+        run: |
+          TEMPLATE_ROOT="$RUNNER_TEMP/godot-wry-template-test"
+          bash turnkey-ios/addons/godot_wry/ios/setup.command \
+            --template-root "$TEMPLATE_ROOT"
+          test -f "$TEMPLATE_ROOT/4.7.stable/ios.zip"
+          test -f "$TEMPLATE_ROOT/4.7.stable.mono/ios.zip"
+          codesign --verify --deep --strict \
+            turnkey-ios/addons/godot_wry/bin/universal-apple-darwin/libgodot_wry.framework
+
+      - name: Download Godot 4.7 Standard and Mono editors
+        run: |
+          curl -L --fail --retry 3 \
+            -o godot47-macos.zip \
+            https://github.com/godotengine/godot/releases/download/4.7-stable/Godot_v4.7-stable_macos.universal.zip
+          unzip -q godot47-macos.zip -d godot47-editor
+          GODOT_BIN="$(find godot47-editor -path '*.app/Contents/MacOS/Godot' | head -1)"
+          test -x "$GODOT_BIN"
+          echo "GODOT_BIN=$GODOT_BIN" >> "$GITHUB_ENV"
+
+          curl -L --fail --retry 3 \
+            -o godot47-mono-macos.zip \
+            https://github.com/godotengine/godot/releases/download/4.7-stable/Godot_v4.7-stable_mono_macos.universal.zip
+          unzip -q godot47-mono-macos.zip -d godot47-mono-editor
+          GODOT_MONO_BIN="$(find godot47-mono-editor -path '*.app/Contents/MacOS/Godot' | head -1)"
+          test -x "$GODOT_MONO_BIN"
+          echo "GODOT_MONO_BIN=$GODOT_MONO_BIN" >> "$GITHUB_ENV"
+
+      - name: Install .NET for Godot Mono iOS smoke
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: "8.0.x"
+
+      - name: Smoke-test Godot 4.7 iOS project export
+        run: |
+          cat > turnkey-ios/project.godot <<'EOF'
+          [application]
+          config/name="Godot WRY iOS Smoke"
+          run/main_scene="res://main.tscn"
+          config/features=PackedStringArray("4.7", "Mobile")
+
+          [rendering]
+          textures/vram_compression/import_etc2_astc=true
+          EOF
+
+          cat > turnkey-ios/main.tscn <<'EOF'
+          [gd_scene format=3]
+
+          [node name="Main" type="Node"]
+          EOF
+
+          cat > turnkey-ios/export_presets.cfg <<'EOF'
+          [preset.0]
+
+          name="iOS"
+          platform="iOS"
+          runnable=true
+          dedicated_server=false
+          custom_features=""
+          export_filter="all_resources"
+          include_filter=""
+          exclude_filter=""
+          export_path="build/GodotWryIOSSmoke.xcodeproj"
+          patches=PackedStringArray()
+          patch_delta_encoding=false
+          patch_delta_compression_level_zstd=19
+          patch_delta_min_reduction=0.1
+          patch_delta_include_filters="*"
+          patch_delta_exclude_filters=""
+          encryption_include_filters=""
+          encryption_exclude_filters=""
+          seed=0
+          encrypt_pck=false
+          encrypt_directory=false
+          script_export_mode=2
+
+          [preset.0.options]
+
+          custom_template/debug=""
+          custom_template/release=""
+          architectures/arm64=true
+          application/app_store_team_id="ABCDEFGHIJ"
+          application/export_method_debug=1
+          application/code_sign_identity_debug=""
+          application/code_sign_identity_release=""
+          application/provisioning_profile_specifier_debug=""
+          application/provisioning_profile_specifier_release=""
+          application/export_method_release=0
+          application/targeted_device_family=2
+          application/bundle_identifier="com.minghuiliu.godotwry.iossmoke"
+          application/signature=""
+          application/short_version="0.3.0"
+          application/version="1"
+          application/min_ios_version="14.0"
+          application/additional_plist_content=""
+          application/icon_interpolation=4
+          application/export_project_only=true
+          application/delete_old_export_files_unconditionally=true
+          application/generate_simulator_library_if_missing=false
+          entitlements/increased_memory_limit=false
+          entitlements/game_center=false
+          entitlements/push_notifications="Disabled"
+          entitlements/additional=""
+          capabilities/access_wifi=false
+          capabilities/performance_gaming_tier=false
+          capabilities/performance_a12=false
+          capabilities/additional=PackedStringArray()
+          user_data/accessible_from_files_app=false
+          user_data/accessible_from_itunes_sharing=false
+          privacy/camera_usage_description=""
+          privacy/camera_usage_description_localized={}
+          privacy/microphone_usage_description=""
+          privacy/microphone_usage_description_localized={}
+          privacy/photolibrary_usage_description=""
+          privacy/photolibrary_usage_description_localized={}
+          privacy/file_timestamp_access_reasons=3
+          privacy/system_boot_time_access_reasons=1
+          privacy/disk_space_access_reasons=3
+          privacy/active_keyboard_access_reasons=0
+          privacy/user_defaults_access_reasons=0
+          privacy/tracking_enabled=false
+          privacy/tracking_domains=PackedStringArray()
+          EOF
+
+          rm -rf "$HOME/Library/Application Support/Godot/export_templates/4.7.stable" \
+                 "$HOME/Library/Application Support/Godot/export_templates/4.7.stable.mono"
+
+          mkdir -p turnkey-ios/build
+          "$GODOT_BIN" --headless --editor --path turnkey-ios --quit
+
+          # Zero-step turnkey check: opening the project must install the bundled
+          # Standard and Mono ios.zip files without running install.py or downloading.
+          test -f "$HOME/Library/Application Support/Godot/export_templates/4.7.stable/ios.zip"
+          test -f "$HOME/Library/Application Support/Godot/export_templates/4.7.stable.mono/ios.zip"
+
+          "$GODOT_BIN" --headless --path turnkey-ios \
+            --export-debug iOS turnkey-ios/build/GodotWryIOSSmoke.xcodeproj
+
+          PBX=turnkey-ios/build/GodotWryIOSSmoke.xcodeproj/project.pbxproj
+          test -f "$PBX"
+          grep -q "libgodot_wry.xcframework" "$PBX"
+          grep -q "gdext_rust_init" "$PBX"
+          grep -q -- "-framework WebKit" "$PBX"
+
+          xcodebuild \
+            -project turnkey-ios/build/GodotWryIOSSmoke.xcodeproj \
+            -configuration Debug \
+            -sdk iphonesimulator \
+            -destination 'generic/platform=iOS Simulator' \
+            CODE_SIGNING_ALLOWED=NO \
+            build
+
+      - name: Smoke-test Godot 4.7 Mono iOS project export
+        run: |
+          rm -rf turnkey-ios/.godot
+          "$GODOT_MONO_BIN" --headless --editor --path turnkey-ios --quit
+          "$GODOT_MONO_BIN" --headless --path turnkey-ios \
+            --export-debug iOS turnkey-ios/build/GodotWryIOSMonoSmoke.xcodeproj
+
+          PBX=turnkey-ios/build/GodotWryIOSMonoSmoke.xcodeproj/project.pbxproj
+          test -f "$PBX"
+          grep -q "libgodot_wry.xcframework" "$PBX"
+          grep -q "gdext_rust_init" "$PBX"
+          grep -q -- "-framework WebKit" "$PBX"
+
+          xcodebuild \
+            -project turnkey-ios/build/GodotWryIOSMonoSmoke.xcodeproj \
+            -configuration Debug \
+            -sdk iphonesimulator \
+            -destination 'generic/platform=iOS Simulator' \
+            CODE_SIGNING_ALLOWED=NO \
+            build
+
+      - name: Remove iOS smoke-only project files
+        run: |
+          rm -rf turnkey-ios/.godot turnkey-ios/build
+          rm -f turnkey-ios/project.godot turnkey-ios/main.tscn turnkey-ios/export_presets.cfg
+
+      - name: Stage iOS intermediate artifact
         run: |
           mkdir -p artifact/bin
-          cp -R godot/addons/godot_wry/bin/aarch64-apple-ios artifact/bin/
+          cp -R godot/addons/godot_wry/bin/ios artifact/bin/
 
-      - name: Upload iOS artifact
+      - name: Upload iOS intermediate artifact
         uses: actions/upload-artifact@v4
         with:
-          name: ios-aarch64-apple-ios
+          name: ios
           path: artifact
+          if-no-files-found: error
+
+      - name: Upload iOS turnkey package
+        uses: actions/upload-artifact@v4
+        with:
+          name: godot_wry-ios-godot4.7
+          path: turnkey-ios
           if-no-files-found: error
 
   android:
@@ -224,7 +474,7 @@ jobs:
       - name: Download iOS binaries
         uses: actions/download-artifact@v4
         with:
-          name: ios-aarch64-apple-ios
+          name: ios
           path: package/addons/godot_wry
 
       - name: Download Android binaries and template layer
@@ -239,7 +489,7 @@ jobs:
           test -f package/addons/godot_wry/bin/x86_64-unknown-linux-gnu/libgodot_wry.so
           test -d package/addons/godot_wry/bin/universal-apple-darwin/libgodot_wry.framework
           test -f package/addons/godot_wry/bin/x86_64-pc-windows-msvc/godot_wry.dll
-          test -d package/addons/godot_wry/bin/aarch64-apple-ios/libgodot_wry.xcframework
+          test -d package/addons/godot_wry/bin/ios/libgodot_wry.xcframework
           test -f package/addons/godot_wry/bin/android/arm64-v8a/libgodot_wry.so
           test -f package/addons/godot_wry/bin/android/x86_64/libgodot_wry.so
           test -f package/addons/godot_wry/android/kotlin/com/example/godotwry/RustWebView.kt
@@ -295,15 +545,6 @@ jobs:
           ./Godot_v4.7-stable_linux.x86_64 --headless --path smoke 2>&1 | tee godot47-smoke.log
           grep -q "GODOT_WRY_47_SMOKE_OK" godot47-smoke.log
 
-      - name: Create platform packages
-        run: |
-          cp -R package package-android
-          cp -R package package-ios
-
-          find package-android/addons/godot_wry/bin -mindepth 1 -maxdepth 1             ! -name android -exec rm -rf {} +
-          find package-ios/addons/godot_wry/bin -mindepth 1 -maxdepth 1             ! -name aarch64-apple-ios -exec rm -rf {} +
-          rm -rf package-ios/addons/godot_wry/android/kotlin
-
       - name: Upload all-platform Godot addon
         uses: actions/upload-artifact@v4
         with:
@@ -311,95 +552,356 @@ jobs:
           path: package
           if-no-files-found: error
 
-      - name: Upload Android Godot package
-        uses: actions/upload-artifact@v4
-        with:
-          name: godot_wry-android
-          path: package-android
-          if-no-files-found: error
+  android-turnkey:
+    name: 📦 Android turnkey / ${{ matrix.edition }}
+    needs: [package]
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - edition: standard
+            template_id: 4.7.stable
+            tpz_url: https://github.com/godotengine/godot/releases/download/4.7-stable/Godot_v4.7-stable_export_templates.tpz
+            editor_url: https://github.com/godotengine/godot/releases/download/4.7-stable/Godot_v4.7-stable_linux.x86_64.zip
+            artifact_name: godot_wry-android-godot4.7-standard
+          - edition: mono
+            template_id: 4.7.stable.mono
+            tpz_url: https://github.com/godotengine/godot/releases/download/4.7-stable/Godot_v4.7-stable_mono_export_templates.tpz
+            editor_url: https://github.com/godotengine/godot/releases/download/4.7-stable/Godot_v4.7-stable_mono_linux_x86_64.zip
+            artifact_name: godot_wry-android-godot4.7-mono
 
-      - name: Upload iOS Godot package
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Download all-platform addon
+        uses: actions/download-artifact@v4
+        with:
+          name: godot_wry
+          path: base-package
+
+      - name: Install Java 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - name: Install .NET runtime for Mono editor
+        if: ${{ matrix.edition == 'mono' }}
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: "8.0.x"
+
+      - name: Install Android SDK components
+        run: |
+          yes | sdkmanager --licenses >/dev/null || true
+          sdkmanager \
+            "platforms;android-36" \
+            "build-tools;36.1.0" \
+            "ndk;29.0.14206865"
+
+      - name: Extract official Godot 4.7 Android Build Template
+        run: |
+          python3 scripts/fetch_remote_zip_member.py \
+            "${{ matrix.tpz_url }}" \
+            templates/android_source.zip \
+            android_source.zip
+          python3 -m zipfile -t android_source.zip
+
+      - name: Assemble turnkey Android package
+        run: |
+          python3 scripts/package_turnkey_android.py \
+            --repo . \
+            --addon-source base-package/addons/godot_wry \
+            --android-source android_source.zip \
+            --template-id "${{ matrix.template_id }}" \
+            --output turnkey
+
+          test -f turnkey/android/build/libs/debug/*.aar
+          test -f turnkey/android/build/libs/release/*.aar
+          test -f turnkey/android/.build_version
+          test -f turnkey/android/.gdignore
+          grep -q 'addons/godot_wry/android/godot_wry.gradle' turnkey/android/build/build.gradle
+
+      - name: Download matching Godot 4.7 editor
+        run: |
+          curl -L --fail --retry 3 \
+            -o godot47-editor.zip \
+            "${{ matrix.editor_url }}"
+          unzip -q godot47-editor.zip -d godot47-editor
+          GODOT_BIN="$(find godot47-editor -type f -name 'Godot*' -perm -111 | head -1)"
+          test -n "$GODOT_BIN"
+          chmod +x "$GODOT_BIN"
+          echo "GODOT_BIN=$GODOT_BIN" >> "$GITHUB_ENV"
+          "$GODOT_BIN" --version
+
+      - name: Create Android export smoke project
+        run: |
+          mkdir -p turnkey/web turnkey/build
+          cat > turnkey/project.godot <<'EOF'
+          [application]
+          config/name="Godot WRY Android Turnkey Smoke"
+          run/main_scene="res://main.tscn"
+          config/features=PackedStringArray("4.7", "GL Compatibility")
+
+          [rendering]
+          renderer/rendering_method="gl_compatibility"
+          renderer/rendering_method.mobile="gl_compatibility"
+          EOF
+
+          cat > turnkey/main.tscn <<'EOF'
+          [gd_scene format=3]
+
+          [node name="Main" type="Control"]
+          layout_mode = 3
+          anchors_preset = 15
+          anchor_right = 1.0
+          anchor_bottom = 1.0
+
+          [node name="WebView" type="WebView" parent="."]
+          layout_mode = 1
+          anchors_preset = 15
+          anchor_right = 1.0
+          anchor_bottom = 1.0
+          url = "res://web/index.html"
+          EOF
+
+          cat > turnkey/web/index.html <<'EOF'
+          <!doctype html><html><body>GODOT_WRY_ANDROID_TURNKEY_OK</body></html>
+          EOF
+
+          cat > turnkey/export_presets.cfg <<'EOF'
+          [preset.0]
+
+          name="Android"
+          platform="Android"
+          runnable=true
+          dedicated_server=false
+          custom_features=""
+          export_filter="all_resources"
+          include_filter="web/*.html"
+          exclude_filter=""
+          export_path="build/godot-wry-turnkey.apk"
+          patches=PackedStringArray()
+          patch_delta_encoding=false
+          patch_delta_compression_level_zstd=19
+          patch_delta_min_reduction=0.1
+          patch_delta_include_filters="*"
+          patch_delta_exclude_filters=""
+          encryption_include_filters=""
+          encryption_exclude_filters=""
+          seed=0
+          encrypt_pck=false
+          encrypt_directory=false
+          script_export_mode=2
+
+          [preset.0.options]
+
+          custom_template/debug=""
+          custom_template/release=""
+          gradle_build/use_gradle_build=true
+          gradle_build/gradle_build_directory=""
+          gradle_build/android_source_template=""
+          gradle_build/compress_native_libraries=true
+          gradle_build/export_format=0
+          gradle_build/min_sdk="26"
+          gradle_build/target_sdk="35"
+          gradle_build/custom_theme_attributes={}
+          architectures/armeabi-v7a=false
+          architectures/arm64-v8a=true
+          architectures/x86=false
+          architectures/x86_64=false
+          version/code=1
+          version/name="0.3.0-smoke"
+          package/unique_name="com.minghuiliu.godotwry.turnkeysmoke"
+          package/name="Godot WRY Turnkey Smoke"
+          package/signed=false
+          graphics/opengl_debug=false
+          shader_baker/enabled=false
+          xr_features/xr_mode=0
+          screen/immersive_mode=true
+          permissions/internet=true
+          permissions/access_network_state=true
+          EOF
+
+      - name: Export APK without installing any template
+        run: |
+          "$GODOT_BIN" --headless --editor --path turnkey --quit
+          "$GODOT_BIN" --headless --path turnkey \
+            --export-debug Android turnkey/build/godot-wry-turnkey.apk
+
+          APK=turnkey/build/godot-wry-turnkey.apk
+          test -f "$APK"
+          unzip -l "$APK" | tee apk-contents.txt
+          grep -q 'lib/arm64-v8a/libgodot_wry.so' apk-contents.txt
+          grep -q 'assets/web/index.html' apk-contents.txt
+
+          AAPT="$ANDROID_HOME/build-tools/36.1.0/aapt"
+          "$AAPT" dump xmltree "$APK" AndroidManifest.xml > manifest.txt
+          grep -q 'com.example.godotwry.WryActivity' manifest.txt
+          grep -q 'com.godot.game.GodotAppLauncher' manifest.txt
+
+      - name: Remove smoke-only project files
+        run: |
+          rm -rf turnkey/.godot turnkey/build turnkey/web
+          rm -f turnkey/project.godot turnkey/main.tscn turnkey/export_presets.cfg
+
+      - name: Upload turnkey Android package
         uses: actions/upload-artifact@v4
         with:
-          name: godot_wry-ios
-          path: package-ios
+          name: ${{ matrix.artifact_name }}
+          path: turnkey
           if-no-files-found: error
+          include-hidden-files: true
 
   release:
     name: 🚀 Publish GitHub Release
-    needs: [package]
+    needs: [package, android-turnkey, ios]
     if: ${{ github.event_name == 'push' && startsWith(github.event.head_commit.message, 'release:') }}
     runs-on: ubuntu-latest
     permissions:
       contents: write
     env:
-      RELEASE_TAG: v0.2.0
+      RELEASE_TAG: v0.3.0
 
     steps:
-      - name: Download all-platform package
+      - name: Download all-platform addon
         uses: actions/download-artifact@v4
         with:
           name: godot_wry
           path: release/godot_wry
 
-      - name: Download Android package
+      - name: Download Android Standard turnkey package
         uses: actions/download-artifact@v4
         with:
-          name: godot_wry-android
-          path: release/godot_wry-android
+          name: godot_wry-android-godot4.7-standard
+          path: release/godot_wry-android-godot4.7-standard
 
-      - name: Download iOS package
+      - name: Download Android Mono turnkey package
         uses: actions/download-artifact@v4
         with:
-          name: godot_wry-ios
-          path: release/godot_wry-ios
+          name: godot_wry-android-godot4.7-mono
+          path: release/godot_wry-android-godot4.7-mono
 
-      - name: Create release ZIP files
+      - name: Download iOS turnkey package
+        uses: actions/download-artifact@v4
+        with:
+          name: godot_wry-ios-godot4.7
+          path: release/godot_wry-ios-godot4.7
+
+      - name: Create release ZIP files and checksums
         run: |
+          chmod +x release/godot_wry-android-godot4.7-standard/android/build/gradlew
+          chmod +x release/godot_wry-android-godot4.7-mono/android/build/gradlew
           (cd release/godot_wry && zip -qr ../godot_wry.zip .)
-          (cd release/godot_wry-android && zip -qr ../godot_wry-android.zip .)
-          (cd release/godot_wry-ios && zip -qr ../godot_wry-ios.zip .)
+          (cd release/godot_wry-android-godot4.7-standard && zip -qr ../godot_wry-android-godot4.7-standard.zip .)
+          (cd release/godot_wry-android-godot4.7-mono && zip -qr ../godot_wry-android-godot4.7-mono.zip .)
+          (cd release/godot_wry-ios-godot4.7 && zip -qr ../godot_wry-ios-godot4.7.zip .)
+          (
+            cd release
+            sha256sum \
+              godot_wry.zip \
+              godot_wry-android-godot4.7-standard.zip \
+              godot_wry-android-godot4.7-mono.zip \
+              godot_wry-ios-godot4.7.zip \
+              > SHA256SUMS
+          )
 
       - name: Publish release
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
           cat > release-notes.md <<'EOF'
-          ## Godot WRY 0.2.0
+          ## Godot WRY 0.3.0 — Turnkey mobile packages
 
-          This release upgrades the extension to **Godot 4.7** and adds support for running WebViews while the game is embedded in the Godot Editor's Game workspace.
+          This release makes Android and iOS distribution project-ready for **Godot 4.7**.
 
-          ### Highlights
-          - Godot 4.7 / godot-rust 0.5.5 (`api-4-7`)
-          - Windows/Linux embedded-game mode continues to use Godot's native child game window
-          - macOS 4.7 embedded-game mode uses an automatic editor-process WebView bridge compatible with Godot's CAContext/CALayer renderer
-          - WebView bounds, visibility, navigation, JavaScript evaluation, IPC, page-load events, focus, zoom and devtools are mirrored in embedded mode
-          - Existing Android and iOS support is retained
+          ### Download the package that matches your target
 
-          ### Included packages
-          - `godot_wry.zip`: all supported platforms
-          - `godot_wry-android.zip`: Android arm64-v8a + x86_64, including WRY Kotlin/Godot Gradle integration
-          - `godot_wry-ios.zip`: iOS arm64 device XCFramework
+          - `godot_wry.zip` — all-platform addon binaries.
+          - `godot_wry-android-godot4.7-standard.zip` — **turnkey Android package for Godot 4.7 Standard**.
+          - `godot_wry-android-godot4.7-mono.zip` — **turnkey Android package for Godot 4.7 Mono/.NET**.
+          - `godot_wry-ios-godot4.7.zip` — **turnkey iOS package**, including static device + simulator XCFramework plus bundled Godot 4.7 Standard/Mono iOS export templates.
+          - `SHA256SUMS` — release checksums.
 
-          ### Android
-          After extracting into an existing Godot project, install the Godot Android Build Template once, then run:
-          ```bash
-          python addons/godot_wry/android/install.py
-          ```
-          Export Android with Gradle Build enabled.
+          ### Android: no Build Template install and no WRY installer
 
-          ### iOS
-          Includes a device-arm64 XCFramework under `addons/godot_wry/bin/aarch64-apple-ios/`.
+          The Android turnkey ZIPs are rooted at the Godot project root and already contain:
 
-          ### Editor embedded game mode
-          No editor plugin needs to be enabled. On macOS, the extension automatically hosts WKWebView in the editor process when `Engine.is_embedded_in_editor()` is active.
+          - `addons/godot_wry`
+          - the matching official Godot 4.7 `android/build` Gradle template
+          - the matching official Godot debug/release AARs
+          - Gradle wrapper
+          - WRY Kotlin/JNI bridge
+          - WRY-compatible `GodotActivity`
+          - arm64-v8a and x86_64 `libgodot_wry.so`
+          - the correct `.build_version` marker
 
-          Built and validated by GitHub Actions on Linux, Windows, macOS, Android and iOS, including a real Godot 4.7 addon load smoke test.
+          Extract the ZIP into the project root and export with **Gradle Build** enabled.
+          You do **not** need to install Godot's Android Build Template separately and
+          you do **not** need to run `addons/godot_wry/android/install.py`.
+
+          Standard and Mono packages are separate so the bundled Godot runtime exactly
+          matches the editor/export-template edition.
+
+          ### iOS: static XCFramework, device + simulator
+
+          The iOS package contains a static `libgodot_wry.xcframework` with:
+
+          - iPhone/iPad device arm64
+          - Apple Silicon simulator arm64
+          - Intel simulator x86_64
+
+          Godot 4.7's Apple Embedded GDExtension exporter links the static XCFramework
+          directly and registers `gdext_rust_init`; no WRY-specific Xcode project edits
+          or framework copy step are required.
+
+          The Release ZIP also contains both official Godot 4.7 Standard and Mono
+          `ios.zip` export templates. Opening the extracted project in Godot on macOS
+          installs those templates automatically and offline. If macOS Gatekeeper marks a
+          browser-downloaded addon as quarantined, run the bundled
+          `bash addons/godot_wry/ios/setup.command`; it clears quarantine only for this
+          addon, refreshes the local ad-hoc signature, and installs both bundled templates.
+          It does not disable Gatekeeper and performs no network download.
+          Apple's Xcode is still required to build and sign native iOS applications.
+
+          ### CI validation
+
+          Before publishing, CI verifies:
+
+          - Linux, Windows and macOS desktop builds
+          - Android arm64-v8a + x86_64 native builds
+          - Android **Standard turnkey ZIP → clean project → APK export**
+          - Android **Mono turnkey ZIP → clean project → APK export**
+          - iOS static XCFramework contains device and simulator slices
+          - opening the turnkey iOS project auto-installs bundled Standard/Mono templates offline
+          - Godot 4.7 **iOS project export** includes the XCFramework and GDExtension entry symbol
+          - Xcode builds the exported iOS project for the iOS Simulator
+          - Godot 4.7 GDExtension load smoke test
+
+          The Android/iOS turnkey packages retain desktop host binaries, so the same
+          project can be opened and tested in the desktop Godot editor before mobile export.
           EOF
 
-          if gh release view "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
-            gh release upload "$RELEASE_TAG"               release/godot_wry.zip               release/godot_wry-android.zip               release/godot_wry-ios.zip               --clobber               --repo "$GITHUB_REPOSITORY"
-          else
-            gh release create "$RELEASE_TAG"               release/godot_wry.zip               release/godot_wry-android.zip               release/godot_wry-ios.zip               --target "$GITHUB_SHA"               --title "Godot WRY v0.2.0 — Godot 4.7 & Editor Embedded WebView"               --notes-file release-notes.md               --repo "$GITHUB_REPOSITORY"
-          fi
+          files=(
+            release/godot_wry.zip
+            release/godot_wry-android-godot4.7-standard.zip
+            release/godot_wry-android-godot4.7-mono.zip
+            release/godot_wry-ios-godot4.7.zip
+            release/SHA256SUMS
+          )
 
+          if gh release view "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            gh release upload "$RELEASE_TAG" "${files[@]}" --clobber --repo "$GITHUB_REPOSITORY"
+            gh release edit "$RELEASE_TAG" \
+              --title "Godot WRY v0.3.0 — Turnkey Android & iOS" \
+              --notes-file release-notes.md \
+              --repo "$GITHUB_REPOSITORY"
+          else
+            gh release create "$RELEASE_TAG" "${files[@]}" \
+              --target "$GITHUB_SHA" \
+              --title "Godot WRY v0.3.0 — Turnkey Android & iOS" \
+              --notes-file release-notes.md \
+              --repo "$GITHUB_REPOSITORY"
+          fi
