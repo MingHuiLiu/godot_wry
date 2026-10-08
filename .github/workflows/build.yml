@@ -730,8 +730,9 @@ jobs:
       - name: Export APK without installing any template
         run: |
           "$GODOT_BIN" --headless --editor --path turnkey --quit
+          ANDROID_SMOKE_OUT="$PWD/turnkey/build/godot-wry-turnkey.apk"
           "$GODOT_BIN" --headless --path turnkey \
-            --export-debug Android turnkey/build/godot-wry-turnkey.apk
+            --export-debug Android "$ANDROID_SMOKE_OUT"
 
           APK=turnkey/build/godot-wry-turnkey.apk
           test -f "$APK"
