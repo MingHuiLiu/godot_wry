@@ -1,29 +1,44 @@
 # Android integration
 
-The packaged Android artifact contains:
+Godot WRY 0.3.0 publishes two **turnkey Android** Release packages:
+
+- `godot_wry-android-godot4.7-standard.zip`
+- `godot_wry-android-godot4.7-mono.zip`
+
+Choose the package that matches the project's Godot 4.7 edition and extract it
+into the **project root**.
+
+Each turnkey package already contains:
 
 - `addons/godot_wry/bin/android/arm64-v8a/libgodot_wry.so`
 - `addons/godot_wry/bin/android/x86_64/libgodot_wry.so`
-- WRY-generated Kotlin bridge sources under `addons/godot_wry/android/kotlin/`
+- WRY-generated Kotlin/JNI bridge sources
 - a WRY-compatible `WryActivity` that subclasses Godot's `GodotActivity`
-- `godot_wry.gradle`, which wires the bridge into Godot's custom Android build
+- the matching official Godot 4.7 `android/build` custom Gradle template
+- matching official Godot debug/release AARs
+- Gradle wrapper files
+- the correct Godot `android/.build_version` marker
+- `godot_wry.gradle` already applied to the custom build
 
-## Existing Godot project
+With a turnkey ZIP, **do not install another Android Build Template and do not
+run `install.py`**. Enable **Gradle Build** in the Android export preset and
+export normally.
 
-1. Copy/extract the artifact into the project root so `addons/godot_wry` exists.
-2. In Godot, run **Project > Install Android Build Template** if the project does not already contain `android/build`.
-3. Run:
+During export, the packaged Gradle integration changes Godot's generated
+activity references to `com.example.godotwry.WryActivity` and adds the
+AndroidX WebKit dependency required by WRY.
 
-   ```sh
-   python addons/godot_wry/android/install.py
-   ```
+## Advanced: existing custom Android Build Template
 
-4. Export Android with **Gradle Build** enabled.
+If a project intentionally owns and maintains its own `android/build` tree,
+the standalone installer is still available:
 
-The installer is idempotent. It only adds the addon Gradle integration to the
-Godot Android build template. During each export, that integration patches
-Godot's generated activity references to `com.example.godotwry.WryActivity`
-and adds the AndroidX WebKit dependency required by WRY.
+```sh
+python addons/godot_wry/android/install.py
+```
 
-Android support targets Godot 4.2+ and currently ships arm64-v8a (devices) and
-x86_64 (emulators).
+The installer is idempotent and only applies the WRY Gradle integration. It is
+not needed for the turnkey packages.
+
+Android support targets Godot 4.7 and ships arm64-v8a (devices) and x86_64
+(emulators).

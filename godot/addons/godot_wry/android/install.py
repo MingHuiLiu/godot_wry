@@ -1,7 +1,10 @@
 #!/usr/bin/env python3
-"""Install godot_wry's Android Gradle integration into an existing Godot project.
+"""Install godot_wry into a manually maintained Android Gradle template.
 
-Run this from the project root after Godot's "Install Android Build Template".
+Most users should use the turnkey Android Release ZIP instead. The turnkey ZIP
+already contains the matching Godot 4.7 Build Template and this integration is
+pre-applied, so this script is only for advanced/custom-template workflows.
+
 The operation is idempotent and only appends one apply-from line.
 """
 
@@ -46,7 +49,8 @@ def main() -> int:
     if not gradle_file.exists():
         print(
             "[godot_wry] android/build/build.gradle not found. "
-            "In Godot choose Project > Install Android Build Template, then run this command again.",
+            "Use a turnkey Android Release ZIP, or install/maintain a custom "
+            "Godot Android Build Template before using this advanced installer.",
             file=sys.stderr,
         )
         return 2
@@ -61,7 +65,7 @@ def main() -> int:
     else:
         print("[godot_wry] Android Gradle integration is already installed.")
 
-    print("[godot_wry] Android template is ready. Export with Gradle Build enabled.")
+    print("[godot_wry] Custom Android template is ready. Export with Gradle Build enabled.")
     return 0
 
 
