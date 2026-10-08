@@ -9,6 +9,7 @@ Godot export-template directory for the matching Standard or Mono edition.
 from __future__ import annotations
 
 import argparse
+import filecmp
 import platform
 import shutil
 from pathlib import Path
@@ -65,6 +66,17 @@ def main() -> int:
         destination_dir = template_root / version_dir
         destination = destination_dir / "ios.zip"
         destination_dir.mkdir(parents=True, exist_ok=True)
+
+        if destination.is_file() and filecmp.cmp(bundled, destination, shallow=False):
+            print(f"[godot_wry] {edition} iOS template is already current: {destination}")
+            continue
+
+        if destination.is_file():
+            backup = destination_dir / "ios.zip.godot-wry-original"
+            if not backup.exists():
+                shutil.copy2(destination, backup)
+                print(f"[godot_wry] Backed up existing template: {backup}")
+
         shutil.copy2(bundled, destination)
         print(f"[godot_wry] Installed {edition} iOS template: {destination}")
 
