@@ -210,6 +210,7 @@ jobs:
           [application]
           config/name="Godot WRY iOS Smoke"
           run/main_scene="res://main.tscn"
+          config/icon="res://addons/godot_wry/icons/webview.svg"
           config/features=PackedStringArray("4.7", "Mobile")
 
           [rendering]
