@@ -306,8 +306,9 @@ jobs:
           test -f "$HOME/Library/Application Support/Godot/export_templates/4.7.stable/ios.zip"
           test -f "$HOME/Library/Application Support/Godot/export_templates/4.7.stable.mono/ios.zip"
 
+          IOS_STANDARD_OUT="$PWD/turnkey-ios/build/GodotWryIOSSmoke.xcodeproj"
           "$GODOT_BIN" --headless --path turnkey-ios \
-            --export-debug iOS turnkey-ios/build/GodotWryIOSSmoke.xcodeproj
+            --export-debug iOS "$IOS_STANDARD_OUT"
 
           PBX=turnkey-ios/build/GodotWryIOSSmoke.xcodeproj/project.pbxproj
           test -f "$PBX"
@@ -327,8 +328,9 @@ jobs:
         run: |
           rm -rf turnkey-ios/.godot
           "$GODOT_MONO_BIN" --headless --editor --path turnkey-ios --quit
+          IOS_MONO_OUT="$PWD/turnkey-ios/build/GodotWryIOSMonoSmoke.xcodeproj"
           "$GODOT_MONO_BIN" --headless --path turnkey-ios \
-            --export-debug iOS turnkey-ios/build/GodotWryIOSMonoSmoke.xcodeproj
+            --export-debug iOS "$IOS_MONO_OUT"
 
           PBX=turnkey-ios/build/GodotWryIOSMonoSmoke.xcodeproj/project.pbxproj
           test -f "$PBX"
