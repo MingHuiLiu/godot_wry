@@ -45,6 +45,8 @@ use std::sync::{Arc, Mutex};
 use std::path::PathBuf;
 #[cfg(target_os = "macos")]
 use std::fs;
+#[cfg(target_os = "macos")]
+use std::io::{BufReader, Read};
 use wry::{WebViewBuilder, WebContext, Rect, WebViewAttributes, PageLoadEvent};
 use wry::dpi::{PhysicalPosition, PhysicalSize};
 use wry::http::Request;
@@ -67,6 +69,45 @@ use {
 #[cfg(all(not(target_os = "android"), target_os = "windows"))]
 #[link(name = "wevtapi")]
 extern "system" {}
+
+#[cfg(target_os = "macos")]
+fn files_equal(left: &std::path::Path, right: &std::path::Path) -> bool {
+    let Ok(left_meta) = fs::metadata(left) else {
+        return false;
+    };
+    let Ok(right_meta) = fs::metadata(right) else {
+        return false;
+    };
+    if left_meta.len() != right_meta.len() {
+        return false;
+    }
+
+    let Ok(left_file) = fs::File::open(left) else {
+        return false;
+    };
+    let Ok(right_file) = fs::File::open(right) else {
+        return false;
+    };
+    let mut left_reader = BufReader::new(left_file);
+    let mut right_reader = BufReader::new(right_file);
+    let mut left_buf = [0u8; 64 * 1024];
+    let mut right_buf = [0u8; 64 * 1024];
+
+    loop {
+        let Ok(left_read) = left_reader.read(&mut left_buf) else {
+            return false;
+        };
+        let Ok(right_read) = right_reader.read(&mut right_buf) else {
+            return false;
+        };
+        if left_read != right_read || left_buf[..left_read] != right_buf[..right_read] {
+            return false;
+        }
+        if left_read == 0 {
+            return true;
+        }
+    }
+}
 
 #[cfg(target_os = "macos")]
 fn install_bundled_ios_export_templates() {
@@ -110,9 +151,7 @@ fn install_bundled_ios_export_templates() {
         let destination_dir = template_root.join(version_dir);
         let destination = destination_dir.join("ios.zip");
 
-        let source_len = fs::metadata(&source).map(|m| m.len()).unwrap_or(0);
-        let destination_len = fs::metadata(&destination).map(|m| m.len()).unwrap_or(0);
-        if source_len != 0 && source_len == destination_len {
+        if files_equal(&source, &destination) {
             continue;
         }
 
